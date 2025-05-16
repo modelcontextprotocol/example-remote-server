@@ -1,0 +1,21 @@
+version: '3.8'
+services:
+  devcontainer:
+    image: mcr.microsoft.com/devcontainers/javascript-node:1-22-bookworm
+
+    volumes:
+      - ../..:/workspaces:cached
+
+    command: sleep infinity
+  
+    environment:
+      REDIS_URL: redis://redis:6379
+
+  redis:
+    image: redis:7.2-bookworm
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+
+volumes:
+  redis-data:
