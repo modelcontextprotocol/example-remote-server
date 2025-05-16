@@ -38,8 +38,8 @@ jobs:
 
     - uses: google-github-actions/auth@v2
       with:
-        project_id: TODO
-        workload_identity_provider: TODO
+        project_id: mcp-server-everything
+        workload_identity_provider: projects/625462337716/locations/global/workloadIdentityPools/github-actions-pool/providers/github-provider
 
     - id: deploy
       uses: google-github-actions/deploy-cloudrun@v2
@@ -48,9 +48,12 @@ jobs:
         region: us-central1
         source: .
         env_vars: |-
-          BASE_URI=https://TODO
-          REDIS_URL=redis://TODO
-          REDIS_TLS=1
+          BASE_URI=https://example-server.modelcontextprotocol.io/sse
+          NODE_ENV=production
+          REDIS_TLS=0
         secrets: |-
-          REDIS_PASSWORD=REDIS_PASSWORD:latest
-          REDIS_TLS_CA=REDIS_TLS_CA:latest
+          REDIS_URL=REDIS_URL:latest
+        flags: |-
+          --vpc-connector=redis-connector
+          --service-account=cloudrun-service@mcp-server-everything.iam.gserviceaccount.com
+          --allow-unauthenticated
