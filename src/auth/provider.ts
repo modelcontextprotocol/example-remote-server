@@ -3,7 +3,6 @@ import { OAuthServerProvider, AuthorizationParams } from '@modelcontextprotocol/
 import { OAuthRegisteredClientsStore } from '@modelcontextprotocol/sdk/server/auth/clients.js';
 import { OAuthClientInformationFull, OAuthTokenRevocationRequest, OAuthTokens } from '@modelcontextprotocol/sdk/shared/auth.js';
 import { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
-import { BASE_URI } from '../config.js';
 import {
   exchangeToken,
   generateToken,
@@ -101,8 +100,6 @@ export class EverythingAuthProvider implements OAuthServerProvider {
     }
 
     if (pendingAuth.clientId !== client.client_id) {
-      console.log('Pending auth clientId', pendingAuth.clientId);
-      console.log('ClientId', client.client_id);
       throw new Error('Authorization code does not match client');
     }
 

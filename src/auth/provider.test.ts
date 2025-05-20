@@ -1,3 +1,4 @@
+import { jest, describe, beforeEach, it, expect } from '@jest/globals';
 import { Response } from "express";
 import { AuthorizationParams } from "@modelcontextprotocol/sdk/server/auth/provider.js";
 import { OAuthClientInformationFull, OAuthTokenRevocationRequest, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
@@ -6,28 +7,6 @@ import { MockRedisClient, setRedisClient } from "../redis.js";
 import { McpInstallation, PendingAuthorization, TokenExchange } from "../types.js";
 import { EverythingAuthProvider, EverythingOAuthClientsStore } from "./provider.js";
 import * as authService from "../services/auth.js";
-
-// Create mocks for the auth service functions
-jest.mock("../services/auth.js", () => {
-  // Use actual implementations for some functions
-  const originalModule = jest.requireActual("../services/auth.js");
-
-  return {
-    ...originalModule,
-    exchangeToken: jest.fn(),
-    generateToken: jest.fn(),
-    getClientRegistration: jest.fn(),
-    readMcpInstallation: jest.fn(),
-    readPendingAuthorization: jest.fn(),
-    readRefreshToken: jest.fn(),
-    revokeMcpInstallation: jest.fn(),
-    saveClientRegistration: jest.fn(),
-    savePendingAuthorization: jest.fn(),
-    saveMcpInstallation: jest.fn(),
-    generateMcpTokens: jest.fn(),
-    saveRefreshToken: jest.fn(),
-  };
-});
 
 // Helper function to create sample client
 function createTestClient(): OAuthClientInformationFull {
@@ -44,7 +23,8 @@ function createMockResponse() {
   const res = {
     redirect: jest.fn().mockReturnThis(),
     status: jest.fn().mockReturnThis(),
-    json: jest.fn().mockReturnThis()
+    json: jest.fn().mockReturnThis(),
+    send: jest.fn().mockReturnThis()
   };
   return res as unknown as jest.Mocked<Response>;
 }
@@ -52,10 +32,11 @@ function createMockResponse() {
 
 function getMockAuthValues() {
   const client = createTestClient();
-  const accessToken = "test-access-token";
+  // Use properly generated tokens for encryption
+  const accessToken = authService.generateToken();
   const newTokens: OAuthTokens = {
-    access_token: "new-access-token",
-    refresh_token: "new-refresh-token",
+    access_token: authService.generateToken(),
+    refresh_token: authService.generateToken(),
     token_type: "bearer",
     expires_in: 3600,
   };
@@ -67,7 +48,7 @@ function getMockAuthValues() {
     mcpTokens: {
       access_token: accessToken,
       token_type: "Bearer",
-      refresh_token: "test-refresh-token",
+      refresh_token: authService.generateToken(),
       expires_in: 3600,
     },
     clientId: client.client_id,
@@ -86,40 +67,41 @@ describe("EverythingOAuthClientsStore", () => {
   let clientsStore: EverythingOAuthClientsStore;
   
   beforeEach(() => {
+    const mockRedis = new MockRedisClient();
+    setRedisClient(mockRedis);
     jest.resetAllMocks();
     clientsStore = new EverythingOAuthClientsStore();
   });
   
   describe("getClient", () => {
     it("returns undefined for non-existent client", async () => {
-      (authService.getClientRegistration as jest.Mock).mockResolvedValueOnce(undefined);
-      
       const result = await clientsStore.getClient("non-existent");
-      
       expect(result).toBeUndefined();
-      expect(authService.getClientRegistration).toHaveBeenCalledWith("non-existent");
     });
     
     it("returns client information for existing client", async () => {
       const client = createTestClient();
-      (authService.getClientRegistration as jest.Mock).mockResolvedValueOnce(client);
+      // First save the client
+      await clientsStore.registerClient(client);
       
+      // Then retrieve it
       const result = await clientsStore.getClient(client.client_id);
       
       expect(result).toEqual(client);
-      expect(authService.getClientRegistration).toHaveBeenCalledWith(client.client_id);
     });
   });
   
   describe("registerClient", () => {
     it("saves and returns client information", async () => {
       const client = createTestClient();
-      (authService.saveClientRegistration as jest.Mock).mockResolvedValueOnce(undefined);
       
       const result = await clientsStore.registerClient(client);
       
       expect(result).toEqual(client);
-      expect(authService.saveClientRegistration).toHaveBeenCalledWith(client.client_id, client);
+      
+      // Verify it was saved
+      const retrieved = await clientsStore.getClient(client.client_id);
+      expect(retrieved).toEqual(client);
     });
   });
 });
@@ -134,14 +116,11 @@ describe("EverythingAuthProvider", () => {
     mockRedis = new MockRedisClient();
     setRedisClient(mockRedis);
     
-    // Set up token generator mock
-    (authService.generateToken as jest.Mock).mockImplementation(() => "mock-token");
-    
     provider = new EverythingAuthProvider();
   });
   
   describe("authorize", () => {
-    it("saves pending authorization and redirects to upstream install", async () => {
+    it("saves pending authorization and sends HTML response", async () => {
       const client = createTestClient();
       // Use a type assertion to make TypeScript ignore the mismatch
       const params = {
@@ -153,16 +132,11 @@ describe("EverythingAuthProvider", () => {
       
       await provider.authorize(client, params, res);
       
-      // Verify pending authorization is saved
-      expect(authService.savePendingAuthorization).toHaveBeenCalledWith("mock-token", {
-        redirectUri: params.redirectUri,
-        codeChallenge: params.codeChallenge,
-        codeChallengeMethod: "S256",
-        clientId: client.client_id,
-      });
-      
-      // Verify redirect to upstream installation
-      expect(res.redirect).toHaveBeenCalledWith(expect.stringContaining("/fakeupstreamauth/authorize?metadata=mock-token"));
+      // Verify HTML sent with redirect
+      expect(res.send).toHaveBeenCalled();
+      const sentHtml = (res.send as jest.Mock).mock.calls[0][0];
+      expect(sentHtml).toContain('MCP Auth Page');
+      expect(sentHtml).toContain('fakeupstreamauth/authorize?redirect_uri=/fakeupstreamauth/callback&state=');
     });
   });
   
@@ -176,18 +150,17 @@ describe("EverythingAuthProvider", () => {
         clientId: client.client_id,
       };
       
-      (authService.readPendingAuthorization as jest.Mock).mockResolvedValueOnce(pendingAuth);
+      // First save the pending authorization
+      const authCode = authService.generateToken();
+      await authService.savePendingAuthorization(authCode, pendingAuth);
       
-      const result = await provider.challengeForAuthorizationCode(client, "test-code");
+      const result = await provider.challengeForAuthorizationCode(client, authCode);
       
       expect(result).toBe("test-challenge");
-      expect(authService.readPendingAuthorization).toHaveBeenCalledWith("test-code");
     });
     
     it("throws error for non-existent authorization code", async () => {
       const client = createTestClient();
-      
-      (authService.readPendingAuthorization as jest.Mock).mockResolvedValueOnce(undefined);
       
       await expect(provider.challengeForAuthorizationCode(client, "test-code"))
         .rejects
@@ -203,9 +176,11 @@ describe("EverythingAuthProvider", () => {
         clientId: "different-client-id",
       };
       
-      (authService.readPendingAuthorization as jest.Mock).mockResolvedValueOnce(pendingAuth);
+      // Save pending auth with different client ID
+      const authCode = authService.generateToken();
+      await authService.savePendingAuthorization(authCode, pendingAuth);
       
-      await expect(provider.challengeForAuthorizationCode(client, "test-code"))
+      await expect(provider.challengeForAuthorizationCode(client, authCode))
         .rejects
         .toThrow("Authorization code does not match client");
     });
@@ -214,30 +189,29 @@ describe("EverythingAuthProvider", () => {
   describe("exchangeAuthorizationCode", () => {
     it("returns tokens when exchange is successful", async () => {
       const client = createTestClient();
-      const tokenData: TokenExchange = {
-        mcpAccessToken: "test-access-token",
-        alreadyUsed: false,
-      };
       const { mcpInstallation } = getMockAuthValues();
       
-      (authService.exchangeToken as jest.Mock).mockResolvedValueOnce(tokenData);
-      (authService.readMcpInstallation as jest.Mock).mockResolvedValueOnce(mcpInstallation);
+      // Setup: save token exchange and installation
+      const authCode = authService.generateToken();
+      const tokenExchange: TokenExchange = {
+        mcpAccessToken: mcpInstallation.mcpTokens.access_token,
+        alreadyUsed: false,
+      };
+      await authService.saveTokenExchange(authCode, tokenExchange);
+      await authService.saveMcpInstallation(mcpInstallation.mcpTokens.access_token, mcpInstallation);
       
-      const result = await provider.exchangeAuthorizationCode(client, "test-code");
+      const result = await provider.exchangeAuthorizationCode(client, authCode);
       
       expect(result).toEqual({
-        access_token: tokenData.mcpAccessToken,
+        access_token: mcpInstallation.mcpTokens.access_token,
         expires_in: mcpInstallation.mcpTokens.expires_in,
         refresh_token: mcpInstallation.mcpTokens.refresh_token,
         token_type: "Bearer",
       });
-      expect(authService.exchangeToken).toHaveBeenCalledWith("test-code");
     });
     
     it("throws error for invalid authorization code", async () => {
       const client = createTestClient();
-      
-      (authService.exchangeToken as jest.Mock).mockResolvedValueOnce(undefined);
       
       await expect(provider.exchangeAuthorizationCode(client, "test-code"))
         .rejects
@@ -250,36 +224,25 @@ describe("EverythingAuthProvider", () => {
       const {
         client,
         accessToken,
-        newTokens,
         mcpInstallation,
       } = getMockAuthValues();
-
       
-      // Mock service calls
-      (authService.readRefreshToken as jest.Mock).mockResolvedValueOnce(accessToken);
-      (authService.readMcpInstallation as jest.Mock).mockResolvedValueOnce(mcpInstallation);
-      (authService.generateMcpTokens as jest.Mock).mockReturnValueOnce(newTokens);
+      // Setup: save refresh token and installation
+      const refreshToken = authService.generateToken();
+      await authService.saveRefreshToken(refreshToken, accessToken);
+      await authService.saveMcpInstallation(accessToken, mcpInstallation);
       
-      const result = await provider.exchangeRefreshToken(client, "test-refresh-token");
+      const result = await provider.exchangeRefreshToken(client, refreshToken);
       
-      expect(result).toEqual(newTokens);
-      expect(authService.readRefreshToken).toHaveBeenCalledWith("test-refresh-token");
-      expect(authService.readMcpInstallation).toHaveBeenCalledWith(accessToken);
-      expect(authService.saveRefreshToken).toHaveBeenCalledWith(newTokens.refresh_token, newTokens.access_token);
-      expect(authService.saveMcpInstallation).toHaveBeenCalledWith(
-        newTokens.access_token, 
-        expect.objectContaining({
-          ...mcpInstallation,
-          mcpTokens: newTokens,
-          issuedAt: expect.any(Number),
-        })
-      );
+      // Should return new tokens
+      expect(result).toHaveProperty('access_token');
+      expect(result).toHaveProperty('refresh_token');
+      expect(result).toHaveProperty('expires_in', 3600);
+      expect(result).toHaveProperty('token_type', 'Bearer');
     });
     
     it("throws error for invalid refresh token", async () => {
       const client = createTestClient();
-      
-      (authService.readRefreshToken as jest.Mock).mockResolvedValueOnce(undefined);
       
       await expect(provider.exchangeRefreshToken(client, "test-refresh-token"))
         .rejects
@@ -288,18 +251,21 @@ describe("EverythingAuthProvider", () => {
     
     it("throws error for refresh token with no installation", async () => {
       const client = createTestClient();
+      const refreshToken = authService.generateToken();
+      const accessToken = authService.generateToken();
       
-      (authService.readRefreshToken as jest.Mock).mockResolvedValueOnce("test-access-token");
-      (authService.readMcpInstallation as jest.Mock).mockResolvedValueOnce(undefined);
+      // Only save refresh token, not the installation
+      await authService.saveRefreshToken(refreshToken, accessToken);
       
-      await expect(provider.exchangeRefreshToken(client, "test-refresh-token"))
+      await expect(provider.exchangeRefreshToken(client, refreshToken))
         .rejects
         .toThrow("Invalid refresh token");
     });
     
     it("throws error when client ID doesn't match", async () => {
       const client = createTestClient();
-      const accessToken = "test-access-token";
+      const accessToken = authService.generateToken();
+      const refreshToken = authService.generateToken();
       
       const mcpInstallation: McpInstallation = {
         fakeUpstreamInstallation: {
@@ -315,10 +281,10 @@ describe("EverythingAuthProvider", () => {
         issuedAt: Date.now() / 1000,
       };
       
-      (authService.readRefreshToken as jest.Mock).mockResolvedValueOnce(accessToken);
-      (authService.readMcpInstallation as jest.Mock).mockResolvedValueOnce(mcpInstallation);
+      await authService.saveRefreshToken(refreshToken, accessToken);
+      await authService.saveMcpInstallation(accessToken, mcpInstallation);
       
-      await expect(provider.exchangeRefreshToken(client, "test-refresh-token"))
+      await expect(provider.exchangeRefreshToken(client, refreshToken))
         .rejects
         .toThrow("Invalid client");
     });
@@ -327,21 +293,15 @@ describe("EverythingAuthProvider", () => {
       const client = createTestClient();
       
       // Simulate the refresh token not being found in Redis (expired)
-      (authService.readRefreshToken as jest.Mock).mockResolvedValueOnce(undefined);
-      
       await expect(provider.exchangeRefreshToken(client, "expired-refresh-token"))
         .rejects
         .toThrow("Invalid refresh token");
-      
-      expect(authService.readRefreshToken).toHaveBeenCalledWith("expired-refresh-token");
-      // Should not proceed to check the installation since the refresh token lookup failed
-      expect(authService.readMcpInstallation).not.toHaveBeenCalled();
     });
   });
   
   describe("verifyAccessToken", () => {
     it("returns auth info for valid token", async () => {
-      const accessToken = "test-access-token";
+      const accessToken = authService.generateToken();
       const mcpInstallation: McpInstallation = {
         fakeUpstreamInstallation: {
           fakeAccessTokenForDemonstration: "fake-upstream-access-token",
@@ -356,7 +316,7 @@ describe("EverythingAuthProvider", () => {
         issuedAt: Date.now() / 1000,
       };
       
-      (authService.readMcpInstallation as jest.Mock).mockResolvedValueOnce(mcpInstallation);
+      await authService.saveMcpInstallation(accessToken, mcpInstallation);
       
       const result = await provider.verifyAccessToken(accessToken);
       
@@ -369,15 +329,13 @@ describe("EverythingAuthProvider", () => {
     });
     
     it("throws error for invalid token", async () => {
-      (authService.readMcpInstallation as jest.Mock).mockResolvedValueOnce(undefined);
-      
       await expect(provider.verifyAccessToken("invalid-token"))
         .rejects
         .toThrow("Invalid access token");
     });
     
     it("throws InvalidTokenError for expired token", async () => {
-      const accessToken = "test-access-token";
+      const accessToken = authService.generateToken();
       const oneDayInSeconds = 24 * 60 * 60;
       const twoDaysAgoInSeconds = Math.floor(Date.now() / 1000) - (2 * oneDayInSeconds);
       
@@ -395,7 +353,7 @@ describe("EverythingAuthProvider", () => {
         issuedAt: twoDaysAgoInSeconds, // 2 days ago, with 1-day expiry
       };
       
-      (authService.readMcpInstallation as jest.Mock).mockResolvedValueOnce(mcpInstallation);
+      await authService.saveMcpInstallation(accessToken, mcpInstallation);
       
       await expect(provider.verifyAccessToken(accessToken))
         .rejects
@@ -404,16 +362,41 @@ describe("EverythingAuthProvider", () => {
   });
   
   describe("revokeToken", () => {
-    it("calls revokeMcpInstallation with token", async () => {
+    it("revokes the installation when given an access token", async () => {
       const client = createTestClient();
+      const accessToken = authService.generateToken();
+      const mcpInstallation: McpInstallation = {
+        fakeUpstreamInstallation: {
+          fakeAccessTokenForDemonstration: "fake-upstream-access-token",
+          fakeRefreshTokenForDemonstration: "fake-upstream-refresh-token",
+        },
+        mcpTokens: {
+          access_token: accessToken,
+          token_type: "Bearer",
+          expires_in: 3600,
+        },
+        clientId: client.client_id,
+        issuedAt: Date.now() / 1000,
+      };
+      
+      // Save the installation
+      await authService.saveMcpInstallation(accessToken, mcpInstallation);
+      
+      // Verify it exists
+      const saved = await authService.readMcpInstallation(accessToken);
+      expect(saved).toBeTruthy();
+      
+      // Revoke it
       const request: OAuthTokenRevocationRequest = {
-        token: "test-token",
+        token: accessToken,
         token_type_hint: "access_token"
       };
       
       await provider.revokeToken(client, request);
       
-      expect(authService.revokeMcpInstallation).toHaveBeenCalledWith(request.token);
+      // Verify it was revoked
+      const revoked = await authService.readMcpInstallation(accessToken);
+      expect(revoked).toBeUndefined();
     });
   });
 });

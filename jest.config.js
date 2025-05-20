@@ -1,12 +1,19 @@
-import { createDefaultEsmPreset } from "ts-jest";
-
-const defaultEsmPreset = createDefaultEsmPreset();
-
-/** @type {import('ts-jest').JestConfigWithTsJest} **/
+/** @type {import('ts-jest').JestConfigWithTsJest} */
 export default {
-  ...defaultEsmPreset,
+  preset: 'ts-jest/presets/default-esm',
+  testEnvironment: 'node',
+  extensionsToTreatAsEsm: ['.ts'],
   moduleNameMapper: {
-    "^(\\.{1,2}/.*)\\.js$": "$1",
+    '^(\\.{1,2}/.*)\\.js$': '$1',
   },
-  testPathIgnorePatterns: ["/node_modules/", "/dist/"],
+  transform: {
+    '^.+\\.tsx?$': [
+      'ts-jest',
+      {
+        useESM: true,
+      },
+    ],
+  },
+  testPathIgnorePatterns: ['/node_modules/', '/dist/', '/scratch/'],
+  injectGlobals: true,
 };
