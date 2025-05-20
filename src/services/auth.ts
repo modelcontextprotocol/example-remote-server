@@ -109,7 +109,7 @@ export function generateMcpTokens(): OAuthTokens {
     access_token: mcpAccessToken,
     refresh_token: mcpRefreshToken,
     expires_in: ACCESS_TOKEN_EXPIRY_SEC,
-    token_type: "bearer",
+    token_type: "Bearer",
   }
 }
 

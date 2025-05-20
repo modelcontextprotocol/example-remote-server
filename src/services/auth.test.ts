@@ -1,3 +1,4 @@
+import { jest } from '@jest/globals';
 import crypto from "crypto";
 import {
   decryptString,
@@ -54,7 +55,7 @@ describe("auth utils", () => {
       expect(tokens.refresh_token).toBeDefined();
       expect(tokens.refresh_token).toMatch(/^[0-9a-f]{64}$/);
       
-      expect(tokens.token_type).toBe("bearer");
+      expect(tokens.token_type).toBe("Bearer");
       expect(tokens.expires_in).toBeDefined();
     });
     
