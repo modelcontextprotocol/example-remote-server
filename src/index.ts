@@ -3,7 +3,7 @@ import express from "express";
 import { BASE_URI, PORT } from "./config.js";
 import { AuthRouterOptions, mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { EverythingAuthProvider } from "./auth/provider.js";
-import { handleMessage, handleSSEConnection, authContext } from "./handlers/mcp.js";
+import { handleMessage, handleSSEConnection, handleStreamableHTTP, authContext } from "./handlers/mcp.js";
 import { handleFakeAuthorizeRedirect, handleFakeAuthorize } from "./handlers/fakeauth.js";
 import { redisClient } from "./redis.js";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
@@ -87,9 +87,14 @@ const options: AuthRouterOptions = {
 app.use(mcpAuthRouter(options));
 const bearerAuth = requireBearerAuth(options);
 
-// MCP routes
+// MCP routes (legacy SSE transport)
 app.get("/sse", cors(corsOptions), bearerAuth, authContext, sseHeaders, handleSSEConnection);
 app.post("/message", cors(corsOptions), bearerAuth, authContext, sensitiveDataHeaders, handleMessage);
+
+// MCP routes (new streamable HTTP transport)
+app.get("/mcp", cors(corsOptions), bearerAuth, authContext, handleStreamableHTTP);
+app.post("/mcp", cors(corsOptions), bearerAuth, authContext, handleStreamableHTTP);
+app.delete("/mcp", cors(corsOptions), bearerAuth, authContext, handleStreamableHTTP);
 
 // Upstream auth routes
 app.get("/fakeupstreamauth/authorize", cors(corsOptions), handleFakeAuthorize);

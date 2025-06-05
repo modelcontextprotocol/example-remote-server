@@ -8,6 +8,10 @@ export interface RedisClient {
   get(key: string): Promise<string | null>;
   set(key: string, value: string, options?: SetOptions): Promise<string | null>;
   getDel(key: string): Promise<string | null>;
+  del(key: string): Promise<number>;
+  expire(key: string, seconds: number): Promise<boolean>;
+  lpush(key: string, ...values: string[]): Promise<number>;
+  lrange(key: string, start: number, stop: number): Promise<string[]>;
   connect(): Promise<void>;
   on(event: string, callback: (error: Error) => void): void;
   options?: { url: string };
@@ -60,6 +64,22 @@ export class RedisClientImpl implements RedisClient {
     );
   }
 
+  async del(key: string): Promise<number> {
+    return await this.redis.del(key);
+  }
+
+  async expire(key: string, seconds: number): Promise<boolean> {
+    return await this.redis.expire(key, seconds);
+  }
+
+  async lpush(key: string, ...values: string[]): Promise<number> {
+    return await this.redis.lPush(key, values);
+  }
+
+  async lrange(key: string, start: number, stop: number): Promise<string[]> {
+    return await this.redis.lRange(key, start, stop);
+  }
+
   async connect(): Promise<void> {
     await this.redis.connect();
   }
@@ -103,6 +123,7 @@ export function setRedisClient(client: RedisClient) {
 export class MockRedisClient implements RedisClient {
   options = { url: "redis://localhost:6379" };
   private store = new Map<string, string>();
+  private lists = new Map<string, string[]>();
   private subscribers = new Map<string, ((message: string) => void)[]>();
   private errorCallbacks = new Map<string, ((error: Error) => void)[]>();
 
@@ -123,6 +144,39 @@ export class MockRedisClient implements RedisClient {
     }
     this.store.set(key, value);
     return oldValue;
+  }
+
+  async del(key: string): Promise<number> {
+    let deleted = 0;
+    if (this.store.has(key)) {
+      this.store.delete(key);
+      deleted++;
+    }
+    if (this.lists.has(key)) {
+      this.lists.delete(key);
+      deleted++;
+    }
+    return deleted;
+  }
+
+  async expire(key: string, _seconds: number): Promise<boolean> {
+    // Mock implementation - just return true if key exists
+    return this.store.has(key) || this.lists.has(key);
+  }
+
+  async lpush(key: string, ...values: string[]): Promise<number> {
+    const list = this.lists.get(key) || [];
+    list.unshift(...values);
+    this.lists.set(key, list);
+    return list.length;
+  }
+
+  async lrange(key: string, start: number, stop: number): Promise<string[]> {
+    const list = this.lists.get(key) || [];
+    if (stop === -1) {
+      return list.slice(start);
+    }
+    return list.slice(start, stop + 1);
   }
 
   async connect(): Promise<void> {
@@ -185,6 +239,7 @@ export class MockRedisClient implements RedisClient {
 
   clear() {
     this.store.clear();
+    this.lists.clear();
     this.subscribers.clear();
     this.errorCallbacks.clear();
   }
