@@ -82,7 +82,13 @@ const options: AuthRouterOptions = {
       windowMs: 5 * 1000,
       limit: 100,
     }
-  }
+  },
+  clientRegistrationOptions: {
+    rateLimit: {
+      windowMs: 60 * 1000, // 1 minute
+      limit: 10, // Limit to 10 registrations per minute
+    },
+  },
 };
 app.use(mcpAuthRouter(options));
 const bearerAuth = requireBearerAuth(options);
