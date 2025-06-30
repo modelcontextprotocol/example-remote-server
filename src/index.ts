@@ -1,12 +1,14 @@
+import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
+import { AuthRouterOptions, mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import cors from "cors";
 import express from "express";
-import { BASE_URI, PORT } from "./config.js";
-import { AuthRouterOptions, mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { EverythingAuthProvider } from "./auth/provider.js";
-import { handleMessage, handleSSEConnection, handleStreamableHTTP, authContext } from "./handlers/mcp.js";
-import { handleFakeAuthorizeRedirect, handleFakeAuthorize } from "./handlers/fakeauth.js";
+import { BASE_URI, PORT } from "./config.js";
+import { authContext } from "./handlers/common.js";
+import { handleFakeAuthorize, handleFakeAuthorizeRedirect } from "./handlers/fakeauth.js";
+import { handleStreamableHTTP } from "./handlers/shttp.js";
+import { handleMessage, handleSSEConnection } from "./handlers/sse.js";
 import { redisClient } from "./redis.js";
-import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 
 const app = express();
 
@@ -61,10 +63,13 @@ const sseHeaders = (req: express.Request, res: express.Response, next: express.N
 const corsOptions = {
   origin: true, // Allow any origin
   methods: ['GET', 'POST'],
-  allowedHeaders: ['Content-Type', 'Authorization', "MCP-Protocol-Version"],
+  allowedHeaders: ['Content-Type', 'Authorization', "Mcp-Protocol-Version", "Mcp-Protocol-Id"],
+  exposedHeaders: ["Mcp-Protocol-Version", "Mcp-Protocol-Id"],
   credentials: true
 };
 
+
+app.use(express.json());
 app.use(logger);
 
 // Apply base security headers to all routes

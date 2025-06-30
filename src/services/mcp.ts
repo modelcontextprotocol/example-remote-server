@@ -109,6 +109,18 @@ export const createMcpServer = () => {
     }
   );
 
+  // Add logging to track all incoming messages
+  const originalSetRequestHandler = server.setRequestHandler.bind(server);
+  server.setRequestHandler = function(schema: any, handler: any) {
+    const wrappedHandler = async (request: any) => {
+      console.log(`[MCP Server] Handling request: ${request.method}`);
+      const result = await handler(request);
+      console.log(`[MCP Server] Request ${request.method} completed`);
+      return result;
+    };
+    return originalSetRequestHandler(schema, wrappedHandler);
+  };
+
   const subscriptions: Set<string> = new Set();
 
   // Set up update interval for subscribed resources

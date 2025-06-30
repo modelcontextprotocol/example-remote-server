@@ -243,7 +243,7 @@ export async function exchangeToken(
 
   const tokenExchange: TokenExchange = JSON.parse(decoded);
   if (tokenExchange.alreadyUsed) {
-    console.error("Duplicate use of authorization code detected; revoking tokens");
+    console.error("1Duplicate use of authorization code detected; revoking tokens");
     await revokeMcpInstallation(tokenExchange.mcpAccessToken);
     throw new Error("Duplicate use of authorization code detected; tokens revoked");
   }
@@ -257,7 +257,7 @@ export async function exchangeToken(
 
   if (rereadData !== data) {
     // Data concurrently changed while we were updating it. This necessarily means a duplicate use.
-    console.error("Duplicate use of authorization code detected; revoking tokens");
+    console.error("2Duplicate use of authorization code detected; revoking tokens");
     await revokeMcpInstallation(tokenExchange.mcpAccessToken);
     throw new Error("Duplicate use of authorization code detected; tokens revoked");
   }

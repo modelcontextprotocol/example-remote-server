@@ -15,6 +15,8 @@ export interface RedisClient {
   connect(): Promise<void>;
   on(event: string, callback: (error: Error) => void): void;
   options?: { url: string };
+  exists(key: string): Promise<boolean>;
+  numsub(key: string): Promise<number>;
 
   /**
    * Creates a pub/sub subscription. Returns a cleanup function to unsubscribe.
@@ -46,6 +48,11 @@ export class RedisClientImpl implements RedisClient {
     this.redis.on("error", (error) =>
       console.error("Redis client error:", error),
     );
+  }
+
+  async numsub(key: string): Promise<number> {
+    const subs = await this.redis.pubSubNumSub(key);
+    return subs[key] || 0;
   }
 
   async get(key: string): Promise<string | null> {
@@ -109,6 +116,11 @@ export class RedisClientImpl implements RedisClient {
 
   async publish(channel: string, message: string): Promise<void> {
     await this.redis.publish(channel, message);
+  }
+
+  async exists(key: string): Promise<boolean> {
+    const result = await this.redis.exists(key);
+    return result > 0;
   }
 }
 
@@ -235,6 +247,14 @@ export class MockRedisClient implements RedisClient {
         }
       }
     }
+  }
+
+  async exists(key: string): Promise<boolean> {
+    return this.store.has(key) || this.lists.has(key);
+  }
+
+  async numsub(key: string): Promise<number> {
+    return (this.subscribers.get(key) || []).length;
   }
 
   clear() {
