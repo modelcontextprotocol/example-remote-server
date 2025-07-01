@@ -7,6 +7,9 @@ import { createClient, SetOptions } from "@redis/client";
 export interface RedisClient {
   get(key: string): Promise<string | null>;
   set(key: string, value: string, options?: SetOptions): Promise<string | null>;
+  setEx(key: string, seconds: number, value: string): Promise<string | null>;
+  del(key: string | string[]): Promise<number>;
+  keys(pattern: string): Promise<string[]>;
   getDel(key: string): Promise<string | null>;
   connect(): Promise<void>;
   on(event: string, callback: (error: Error) => void): void;
@@ -58,6 +61,18 @@ export class RedisClientImpl implements RedisClient {
       value,
       options,
     );
+  }
+
+  async setEx(key: string, seconds: number, value: string): Promise<string | null> {
+    return await this.redis.setEx(key, seconds, value);
+  }
+
+  async del(key: string | string[]): Promise<number> {
+    return await this.redis.del(key);
+  }
+
+  async keys(pattern: string): Promise<string[]> {
+    return await this.redis.keys(pattern);
   }
 
   async connect(): Promise<void> {
@@ -123,6 +138,33 @@ export class MockRedisClient implements RedisClient {
     }
     this.store.set(key, value);
     return oldValue;
+  }
+
+  async setEx(key: string, seconds: number, value: string): Promise<string | null> {
+    this.store.set(key, value);
+    // Mock doesn't handle expiration
+    return null;
+  }
+
+  async del(key: string | string[]): Promise<number> {
+    const keys = Array.isArray(key) ? key : [key];
+    let deleted = 0;
+    for (const k of keys) {
+      if (this.store.delete(k)) {
+        deleted++;
+      }
+    }
+    return deleted;
+  }
+
+  async keys(pattern: string): Promise<string[]> {
+    // Simple pattern matching for mock (only supports * at end)
+    const allKeys = Array.from(this.store.keys());
+    if (pattern.endsWith('*')) {
+      const prefix = pattern.slice(0, -1);
+      return allKeys.filter(k => k.startsWith(prefix));
+    }
+    return allKeys.filter(k => k === pattern);
   }
 
   async connect(): Promise<void> {

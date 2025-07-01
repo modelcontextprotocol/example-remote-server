@@ -4,6 +4,7 @@ import { BASE_URI, PORT } from "./config.js";
 import { AuthRouterOptions, mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { EverythingAuthProvider } from "./auth/provider.js";
 import { handleMessage, handleSSEConnection, authContext } from "./handlers/mcp.js";
+import { handleStreamableHTTP, initializeNodeDiscovery } from "./handlers/mcp-streamable.js";
 import { handleFakeAuthorizeRedirect, handleFakeAuthorize } from "./handlers/fakeauth.js";
 import { redisClient } from "./redis.js";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
@@ -60,8 +61,8 @@ const sseHeaders = (req: express.Request, res: express.Response, next: express.N
 // Configure CORS to allow any origin since this is a public API service
 const corsOptions = {
   origin: true, // Allow any origin
-  methods: ['GET', 'POST'],
-  allowedHeaders: ['Content-Type', 'Authorization', "MCP-Protocol-Version"],
+  methods: ['GET', 'POST', 'DELETE'], // Added DELETE for streamable HTTP
+  allowedHeaders: ['Content-Type', 'Authorization', "MCP-Protocol-Version", "MCP-Session-Id", "Last-Event-ID"],
   credentials: true
 };
 
@@ -90,12 +91,16 @@ const options: AuthRouterOptions = {
     },
   },
 };
-app.use(mcpAuthRouter(options));
-const bearerAuth = requireBearerAuth(options);
+// app.use(mcpAuthRouter(options));
 
-// MCP routes
-app.get("/sse", cors(corsOptions), bearerAuth, authContext, sseHeaders, handleSSEConnection);
-app.post("/message", cors(corsOptions), bearerAuth, authContext, sensitiveDataHeaders, handleMessage);
+// MCP routes (original SSE-based)
+app.get("/sse", cors(corsOptions), sseHeaders, handleSSEConnection);
+app.post("/message", cors(corsOptions), sensitiveDataHeaders, handleMessage);
+
+// MCP routes (new streamable HTTP with multi-node support)
+app.get("/mcp", cors(corsOptions), handleStreamableHTTP);
+app.post("/mcp", cors(corsOptions), express.json({ limit: '4mb' }), handleStreamableHTTP);
+app.delete("/mcp", cors(corsOptions), handleStreamableHTTP);
 
 // Upstream auth routes
 app.get("/fakeupstreamauth/authorize", cors(corsOptions), handleFakeAuthorize);
@@ -103,6 +108,8 @@ app.get("/fakeupstreamauth/callback", cors(corsOptions), handleFakeAuthorizeRedi
 
 try {
   await redisClient.connect();
+  // Initialize node discovery for multi-node support
+  await initializeNodeDiscovery();
 } catch (error) {
   console.error("Could not connect to Redis:", error);
   process.exit(1);
