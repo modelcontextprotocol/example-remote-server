@@ -5,6 +5,7 @@ import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 
+let redisTransportCounter = 0;
 
 function getToServerChannel(sessionId: string): string {
   return `mcp:shttp:toserver:${sessionId}`;
@@ -24,6 +25,7 @@ export async function isLive(sessionId: string): Promise<boolean> {
 
 export class RedisTransport implements Transport {
   private redisCleanup: (() => Promise<void>) | undefined;
+  private counter: number;
 
   onclose?: (() => void) | undefined;
   onerror?: ((error: Error) => void) | undefined;
@@ -34,6 +36,7 @@ export class RedisTransport implements Transport {
     private recvChannel: string,
     private isLiveKey: string | undefined = undefined
   ) {
+    this.counter = redisTransportCounter++;
     this.sendChannel = sendChannel;
     this.recvChannel = recvChannel;
     this.isLiveKey = isLiveKey;
@@ -42,18 +45,26 @@ export class RedisTransport implements Transport {
   
 
   async start(): Promise<void> {
-    console.log(`[RedisTransport.start] Starting transport - send: ${this.sendChannel}, recv: ${this.recvChannel}`);
+    console.log(`[RedisTransport.${this.counter}.start] Starting transport - send: ${this.sendChannel}, recv: ${this.recvChannel}`);
     if (this.redisCleanup) {
       throw new Error(`Redis transport already started for channels ${this.sendChannel} and ${this.recvChannel}`);
     }
 
+    // Log when onmessage is set
+    console.log(`[RedisTransport.${this.counter}.start] onmessage handler is ${this.onmessage ? 'SET' : 'NOT SET'}`);
+
     this.redisCleanup = await redisClient.createSubscription(
       this.recvChannel,
       (json) => {
-        console.log(`[RedisTransport] Received message on ${this.recvChannel}:`, json.substring(0, 100));
+        console.log(`[RedisTransport.${this.counter}] Received message on ${this.recvChannel}:`, json.substring(0, 100));
         const message = JSON.parse(json);
         const extra = popExtra(message);
-        this.onmessage?.(message, extra)
+        if (this.onmessage) {
+          console.log(`[RedisTransport.${this.counter}] Calling onmessage handler for ${this.recvChannel}`);
+          this.onmessage(message, extra)
+        } else {
+          console.log(`[RedisTransport.${this.counter}] WARNING: No onmessage handler for ${this.recvChannel}!`);
+        }
       },
       (error) => {
         console.error(
@@ -63,23 +74,27 @@ export class RedisTransport implements Transport {
         this.close()
       },
     );
-    console.log(`[RedisTransport.start] Successfully subscribed to ${this.recvChannel}`);
+    console.log(`[RedisTransport.${this.counter}.start] Successfully subscribed to ${this.recvChannel}`);
   }
 
-  send(message: JSONRPCMessage, options?: TransportSendOptions): Promise<void> {
+  async send(message: JSONRPCMessage, options?: TransportSendOptions): Promise<void> {
     if (options) {
       setOptions(message, options);
     }
     const messageStr = JSON.stringify(message);
-    console.log(`[RedisTransport.send] Publishing to ${this.sendChannel}:`, messageStr.substring(0, 100));
-    return redisClient.publish(this.sendChannel, messageStr);
+    console.log(`[RedisTransport.${this.counter}.send] Publishing to ${this.sendChannel}:`, messageStr.substring(0, 100));
+    console.log(`[RedisTransport.${this.counter}.send] Full message:`, messageStr);
+    await redisClient.publish(this.sendChannel, messageStr);
+    console.log(`[RedisTransport.${this.counter}.send] Published successfully to ${this.sendChannel}`);
   }
 
 
   async cleanup(): Promise<void> {
     if (this.redisCleanup) {
+      console.log(`[RedisTransport.${this.counter}.cleanup] Unsubscribing from ${this.recvChannel}`);
       await this.redisCleanup()
       this.redisCleanup = undefined;
+      console.log(`[RedisTransport.${this.counter}.cleanup] Successfully unsubscribed from ${this.recvChannel}`);
     }
     if (this.isLiveKey) {
       await redisClient.del(this.isLiveKey);
@@ -87,9 +102,9 @@ export class RedisTransport implements Transport {
   }
 
   async close(): Promise<void> {
-    console.log(`[RedisTransport.close] Closing transport - send: ${this.sendChannel}, recv: ${this.recvChannel}`);
+    console.log(`[RedisTransport.${this.counter}.close] Closing transport - send: ${this.sendChannel}, recv: ${this.recvChannel}`);
     this.onclose?.();
-    this.cleanup()
+    await this.cleanup()
   }
 }
 
@@ -186,11 +201,20 @@ function relayTransports(transport1: Transport, transport2: Transport): void {
     transport1.onerror?.(error);
   };
 
+  // Prevent circular close calls
+  let closing = false;
+  
   transport1.onclose = () => {
-    transport2.close().catch(console.error);
+    if (!closing) {
+      closing = true;
+      transport2.close().catch(console.error);
+    }
   };
   transport2.onclose = () => {
-    transport1.close().catch(console.error);
+    if (!closing) {
+      closing = true;
+      transport1.close().catch(console.error);
+    }
   };
 }
 
@@ -198,6 +222,15 @@ function relayTransports(transport1: Transport, transport2: Transport): void {
 export async function startServerListeningToRedis(server: Server, sessionId: string) {
   console.log(`[startServerListeningToRedis] Starting background server for session ${sessionId}`);
   const serverRedisTransport = createBackgroundTaskSideRedisTransport(sessionId)
+  
+  // Log all messages sent by the server
+  const originalSend = serverRedisTransport.send.bind(serverRedisTransport);
+  serverRedisTransport.send = async (message, options) => {
+    console.log(`[MCP Server -> Redis] Sending response:`, JSON.stringify(message).substring(0, 200));
+    return originalSend(message, options);
+  };
+  
+  // The server.connect() will call start() on the transport
   await server.connect(serverRedisTransport)
   console.log(`[startServerListeningToRedis] Background server connected for session ${sessionId}`);
 }
@@ -216,7 +249,7 @@ function createBackgroundTaskSideRedisTransport(sessionId: string): RedisTranspo
   );
 }
 
-export async function getFirstShttpTransport(sessionId: string): Promise<StreamableHTTPServerTransport> {
+export async function getFirstShttpTransport(sessionId: string): Promise<{shttpTransport: StreamableHTTPServerTransport, redisTransport: RedisTransport}> {
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: () => sessionId,
     enableJsonResponse: true, // Enable JSON response mode
@@ -227,14 +260,15 @@ export async function getFirstShttpTransport(sessionId: string): Promise<Streama
   // When shttpTransport closes, so does the redisTransport
   relayTransports(redisTransport, transport);
   await redisTransport.start()
-  return transport;
+  return { shttpTransport: transport, redisTransport };
 }
 
-export async function getShttpTransport(sessionId: string): Promise<StreamableHTTPServerTransport> {
+export async function getShttpTransport(sessionId: string): Promise<{shttpTransport: StreamableHTTPServerTransport, redisTransport: RedisTransport}> {
   // Giving undefined here and setting the sessionId means the 
   // transport wont try to create a new session.
   const shttpTransport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: undefined
+    sessionIdGenerator: undefined,
+    enableJsonResponse: true, // Use JSON response mode for all requests
   })
   shttpTransport.sessionId = sessionId;
 
@@ -243,5 +277,5 @@ export async function getShttpTransport(sessionId: string): Promise<StreamableHT
   // When shttpTransport closes, so does the redisTransport
   relayTransports(redisTransport, shttpTransport);
   await redisTransport.start()
-  return shttpTransport;
+  return { shttpTransport, redisTransport };
 }

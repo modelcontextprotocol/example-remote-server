@@ -1,4 +1,4 @@
-import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
+import { BearerAuthMiddlewareOptions, requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import { AuthRouterOptions, mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import cors from "cors";
 import express from "express";
@@ -9,6 +9,7 @@ import { handleFakeAuthorize, handleFakeAuthorizeRedirect } from "./handlers/fak
 import { handleStreamableHTTP } from "./handlers/shttp.js";
 import { handleMessage, handleSSEConnection } from "./handlers/sse.js";
 import { redisClient } from "./redis.js";
+import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 
 const app = express();
 
@@ -78,6 +79,8 @@ app.use(baseSecurityHeaders);
 // Enable CORS pre-flight requests
 app.options('*', cors(corsOptions));
 
+
+const authProvider = new EverythingAuthProvider();
 // Auth configuration
 const options: AuthRouterOptions = {
   provider: new EverythingAuthProvider(),
@@ -89,8 +92,16 @@ const options: AuthRouterOptions = {
     }
   }
 };
+
+const dearerAuthMiddlewareOptions: BearerAuthMiddlewareOptions = {
+  // verifyAccessToken(token: string): Promise<AuthInfo>;
+  verifier: {
+    verifyAccessToken: authProvider.verifyAccessToken.bind(authProvider),
+  }
+}
+
 app.use(mcpAuthRouter(options));
-const bearerAuth = requireBearerAuth(options);
+const bearerAuth = requireBearerAuth(dearerAuthMiddlewareOptions);
 
 // MCP routes (legacy SSE transport)
 app.get("/sse", cors(corsOptions), bearerAuth, authContext, sseHeaders, handleSSEConnection);

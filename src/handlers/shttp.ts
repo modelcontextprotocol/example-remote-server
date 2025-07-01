@@ -1,11 +1,10 @@
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { Request, Response } from "express";
-import { getFirstShttpTransport, getShttpTransport, isLive, startServerListeningToRedis } from "../services/redisTransport.js";
+import { getFirstShttpTransport, getShttpTransport, isLive, RedisTransport, startServerListeningToRedis } from "../services/redisTransport.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { randomUUID } from "crypto";
 import { createMcpServer } from "../services/mcp.js";
-import getRawBody from "raw-body";
 
 
 declare module "express-serve-static-core" {
@@ -22,7 +21,8 @@ export async function handleStreamableHTTP(req: Request, res: Response) {
   console.log('Received MCP request:', JSON.stringify(req.body, null, 2));
   console.log('Request headers:', JSON.stringify(req.headers, null, 2));
   
-  let transport: StreamableHTTPServerTransport | undefined = undefined;
+  let shttpTransport: StreamableHTTPServerTransport | undefined = undefined;
+  let redisTransport: RedisTransport | undefined = undefined;
   try {
     // Check for existing session ID
     const sessionId = req.headers['mcp-session-id'] as string | undefined;
@@ -31,7 +31,11 @@ export async function handleStreamableHTTP(req: Request, res: Response) {
     if (sessionId && await isLive(sessionId)) {
       console.log('Session is live, reusing existing transport for session:', sessionId);
       // Reuse existing transport
-      transport = await getShttpTransport(sessionId)
+      // const { shttpTransport, redisTransport } = await getShttpTransport(sessionId);
+      // destructuring to get both transports
+      ({ shttpTransport, redisTransport } = await getShttpTransport(sessionId));
+
+      console.log('Created transport for session:', sessionId);
       console.log('Retrieved transport from Redis for session:', sessionId);
     } else if (!sessionId && isInitializeRequest(req.body)) {
       console.log('New initialization request detected, creating new session');
@@ -45,20 +49,9 @@ export async function handleStreamableHTTP(req: Request, res: Response) {
       startServerListeningToRedis(server.server, sessionId)
       console.log('Started server listening to Redis for session:', sessionId);
       
-      transport = await getFirstShttpTransport(sessionId);
+      ({ shttpTransport, redisTransport } = await getFirstShttpTransport(sessionId));
       console.log('Retrieved first transport for session:', sessionId);
-      console.log('Transport object:', transport.constructor.name, 'sessionId:', transport.sessionId);
-
-      // Connect the transport to the MCP server BEFORE handling the request
-      console.log('Connecting transport to MCP server...');
-      await server.server.connect(transport);
-      console.log('Transport connected successfully');
-      
-      console.log('Handling initialization request...');
-      await transport.handleRequest(req, res, req.body);
-      console.log('Initialization request handled successfully');
-      console.log('=== handleStreamableHTTP END (initialization) ===');
-      return; // Already handled
+      console.log('Transport object:', shttpTransport.constructor.name, 'sessionId:', shttpTransport.sessionId);
     } else {
       console.log('Invalid request - no session ID and not an initialization request');
       console.log('Session ID present:', !!sessionId);
@@ -79,9 +72,9 @@ export async function handleStreamableHTTP(req: Request, res: Response) {
 
     // Handle the request with existing transport - no need to reconnect
     console.log('Handling request with existing transport for session:', sessionId);
-    console.log('Transport object:', transport.constructor.name, 'sessionId:', transport.sessionId);
-    console.log('Request body:', JSON.stringify(req.body, null, 2));
-    await transport.handleRequest(req, res, req.body);
+    console.log('Transport object:', shttpTransport.constructor.name, 'sessionId:', shttpTransport.sessionId);
+    console.log('Request body:', JSON.stringify(req.body, null, 2));    
+    await shttpTransport.handleRequest(req, res, req.body);
     console.log('Request handled successfully');
   } catch (error) {
     console.error('=== ERROR in handleStreamableHTTP ===');
@@ -104,12 +97,13 @@ export async function handleStreamableHTTP(req: Request, res: Response) {
       console.log('Response headers already sent, cannot send error response');
     }
   } finally {
-    // if (transport) {
-    //   console.log('Closing transport in finally block');
-    //   // Close transports because they are ephemeral in this setup.
-    //   transport.close();
-    //   console.log('Transport closed');
-    // }
+    // Set up cleanup when response is complete
+    res.on('finish', async () => {
+      console.log('HTTP response finished, closing transport');
+      await shttpTransport?.close();
+      // await redisTransport?.close();
+      console.log('Transport closed after response');
+    });
     console.log('=== handleStreamableHTTP END ===');
   }
 }
