@@ -2,17 +2,30 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { redisClient } from "../redis.js";
 import { Transport, TransportSendOptions } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
-import { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
+import { JSONRPCMessage, MessageExtraInfo } from "@modelcontextprotocol/sdk/types.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 
 let redisTransportCounter = 0;
+
+interface RedisMessage {
+  mcpMessage: JSONRPCMessage;
+  extra?: MessageExtraInfo;
+  options?: TransportSendOptions;
+}
+
+function sendToMcpServer(sessionId: string, message: JSONRPCMessage, extra?: { authInfo?: AuthInfo; }, options?: TransportSendOptions): Promise<void> {
+  const toServerChannel = getToServerChannel(sessionId);
+  const redisMessage: RedisMessage = { mcpMessage: message, extra, options };
+  console.log(`[sendToServerChannel] Publishing to ${toServerChannel}:`, JSON.stringify(redisMessage).substring(0, 100));
+  return redisClient.publish(toServerChannel, JSON.stringify(redisMessage));
+}
 
 function getToServerChannel(sessionId: string): string {
   return `mcp:shttp:toserver:${sessionId}`;
 }
 
-function getToClientChannel(sessionId: string): string {
-  return `mcp:shttp:toclient:${sessionId}`;
+function getToClientChannel(sessionId: string, relatedRequestId: string): string {
+  return `mcp:shttp:toclient:${sessionId}:${relatedRequestId}`;
 }
 
 export async function isLive(sessionId: string): Promise<boolean> {
@@ -20,6 +33,48 @@ export async function isLive(sessionId: string): Promise<boolean> {
   const numSubs = await redisClient.numsub(getToServerChannel(sessionId));
   console.log(`[isLive] Session ${sessionId}: Redis subscribers on ${getToServerChannel(sessionId)} = ${numSubs}`);
   return numSubs > 0;
+}
+
+
+export function redisRelayToMcpServer(sessionId: string, transport: Transport): () => Promise<void> {
+  let redisCleanup: (() => Promise<void>) | undefined = undefined;
+  const cleanup = async () => {
+    // TODO: solve race conditions where we call cleanup while the subscription is being created / before it is created
+    if (redisCleanup) {
+      await redisCleanup();
+    }
+  }
+
+  new Promise<JSONRPCMessage>((resolve) => {
+    transport.onmessage = async (message, extra) => {
+      await sendToMcpServer(sessionId, message, extra);
+      resolve(message);
+    }
+  }).then(async (message) => {
+    // check for request id in the message
+    if (!("id" in message)) {
+      // if no id, it's a notification, so we return
+      return cleanup;
+    }
+    // otherwise we subscribe to the response channel
+    const toClientChannel = getToClientChannel(sessionId, message.id.toString());
+
+    console.log(`[redisRelayToMcpServer] Subscribing to ${toClientChannel} for response to request ${message.id}`);
+
+    redisCleanup = await redisClient.createSubscription(toClientChannel, async (redisMessageJson) => {
+      const redisMessage = JSON.parse(redisMessageJson) as RedisMessage;
+      await transport.send(redisMessage.mcpMessage, redisMessage.options);
+    }, (error) => {
+      console.error(`[redisRelayToMcpServer] Error in Redis subscriber for ${toClientChannel}:`, error);
+      transport.onerror?.(error);
+    });
+  }).catch((error) => {
+    console.error(`[redisRelayToMcpServer] Error setting up Redis relay for session ${sessionId}:`, error);
+    transport.onerror?.(error);
+    cleanup();
+  });
+
+  return cleanup;
 }
 
 
@@ -41,8 +96,6 @@ export class RedisTransport implements Transport {
     this.recvChannel = recvChannel;
     this.isLiveKey = isLiveKey;
   }
-
-  
 
   async start(): Promise<void> {
     console.log(`[RedisTransport.${this.counter}.start] Starting transport - send: ${this.sendChannel}, recv: ${this.recvChannel}`);
@@ -107,117 +160,6 @@ export class RedisTransport implements Transport {
     await this.cleanup()
   }
 }
-
-
-function setExtra(message: JSONRPCMessage, extra: { authInfo?: AuthInfo; } | undefined): void {
-  if (!extra) {
-    return;
-  }
-  if ("result" in message && typeof message.result === 'object') {
-    if (!message.result._meta) {
-      message.result._meta = {};
-    }
-    message.result._meta.extra = extra;
-  }
-  if ("params" in message && typeof message.params === 'object') {
-    if (!message.params._meta) {
-      message.params._meta = {};
-    }
-    message.params._meta.extra = extra;
-  }
-}
-
-function setOptions(message: JSONRPCMessage, options: TransportSendOptions): void {
-  if ("result" in message && typeof message.result === 'object') {
-    if (!message.result._meta) {
-      message.result._meta = {};
-    }
-    message.result._meta.options = options;
-  }
-  if ("params" in message && typeof message.params === 'object') {
-    if (!message.params._meta) {
-      message.params._meta = {};
-    }
-    message.params._meta.options = options;
-  }
-}
-
-function popExtra(message: JSONRPCMessage): { authInfo?: AuthInfo; } | undefined {
-  if ("params" in message && typeof message.params === 'object' && message.params._meta) {
-    const extra = message.params._meta.extra as { authInfo?: AuthInfo; } | undefined;
-    if (extra) {
-      delete message.params._meta.extra;
-      return extra;
-    }
-  }
-  if ("result" in message && typeof message.result === 'object' && message.result._meta) {
-    const extra = message.result._meta.extra as { authInfo?: AuthInfo; } | undefined;
-    if (extra) {
-      delete message.result._meta.extra;
-      return extra;
-    }
-  }
-  return undefined;
-}
-
-function popOptions(message: JSONRPCMessage): TransportSendOptions | undefined {
-  if ("params" in message && typeof message.params === 'object' && message.params._meta) {
-    const options = message.params._meta.options as TransportSendOptions | undefined;
-    if (options) {
-      delete message.params._meta.options;
-      return options;
-    }
-  }
-  if ("result" in message && typeof message.result === 'object' && message.result._meta) {
-    const options = message.result._meta.options as TransportSendOptions | undefined;
-    if (options) {
-      delete message.result._meta.options;
-      return options;
-    }
-  }
-  return undefined;
-}
-
-
-function relayTransports(transport1: Transport, transport2: Transport): void {
-  console.log(`[relayTransports] Setting up relay between transports`);
-  transport1.onmessage = (message, extra) => {
-    console.log(`[relay] transport1 -> transport2:`, JSON.stringify(message).substring(0, 100));
-    setExtra(message, extra);
-    const options = popOptions(message);
-    transport2.send(message, options)
-  };
-  transport2.onmessage = (message, extra) => {
-    console.log(`[relay] transport2 -> transport1:`, JSON.stringify(message).substring(0, 100));
-    setExtra(message, extra);
-    const options = popOptions(message);
-    transport1.send(message, options)
-  };
-
-  transport1.onerror = (error) => {
-    transport2.onerror?.(error);
-  };
-  transport2.onerror = (error) => {
-    transport1.onerror?.(error);
-  };
-
-  // Prevent circular close calls
-  let closing = false;
-  
-  transport1.onclose = () => {
-    if (!closing) {
-      closing = true;
-      transport2.close().catch(console.error);
-    }
-  };
-  transport2.onclose = () => {
-    if (!closing) {
-      closing = true;
-      transport1.close().catch(console.error);
-    }
-  };
-}
-
 
 export async function startServerListeningToRedis(server: Server, sessionId: string) {
   console.log(`[startServerListeningToRedis] Starting background server for session ${sessionId}`);
