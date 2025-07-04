@@ -104,34 +104,24 @@ export class RedisClientImpl implements RedisClient {
     onMessage: (message: string) => void,
     onError: (error: Error) => void,
   ): Promise<() => Promise<void>> {
-    console.log(`[RedisClient] Creating subscription for channel: ${channel}`);
     const subscriber = this.redis.duplicate();
     subscriber.on("error", (error) => {
-      console.error(`[RedisClient] Subscriber error for channel ${channel}:`, error);
       onError(error);
     });
     
-    console.log(`[RedisClient] Connecting subscriber for channel: ${channel}`);
     await subscriber.connect();
-    console.log(`[RedisClient] Connected subscriber for channel: ${channel}`);
     
-    console.log(`[RedisClient] Subscribing to channel: ${channel}`);
     await subscriber.subscribe(channel, (message) => {
-      console.log(`[RedisClient] Received message on channel ${channel}:`, message.substring(0, 100));
       onMessage(message);
     });
-    console.log(`[RedisClient] Successfully subscribed to channel: ${channel}`);
 
     return async () => {
-      console.log(`[RedisClient] Cleaning up subscription for channel: ${channel}`);
       await subscriber.disconnect();
     };
   }
 
   async publish(channel: string, message: string): Promise<void> {
-    console.log(`[RedisClient] Publishing to channel: ${channel}, message length: ${message.length}`);
     await this.redis.publish(channel, message);
-    console.log(`[RedisClient] Successfully published to channel: ${channel}`);
   }
 
   async exists(key: string): Promise<boolean> {

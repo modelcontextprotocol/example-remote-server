@@ -25,8 +25,6 @@ type RedisMessage =
 function sendToMcpServer(sessionId: string, message: JSONRPCMessage, extra?: { authInfo?: AuthInfo; }, options?: TransportSendOptions): Promise<void> {
   const toServerChannel = getToServerChannel(sessionId);
   const redisMessage: RedisMessage = { type: 'mcp', message, extra, options };
-  console.log(`[sendToMcpServer] Publishing to Redis channel: ${toServerChannel}`);
-  console.log(`[sendToMcpServer] Message:`, JSON.stringify(message));
   return redisClient.publish(toServerChannel, JSON.stringify(redisMessage));
 }
 
@@ -64,10 +62,8 @@ export async function isLive(sessionId: string): Promise<boolean> {
 
 
 export function redisRelayToMcpServer(sessionId: string, transport: Transport): () => Promise<void> {
-  console.log(`[redisRelayToMcpServer] Setting up relay for session: ${sessionId}`);
   let redisCleanup: (() => Promise<void>) | undefined = undefined;
   const cleanup = async () => {
-    console.log(`[redisRelayToMcpServer] Cleaning up relay for session: ${sessionId}`);
     // TODO: solve race conditions where we call cleanup while the subscription is being created / before it is created
     if (redisCleanup) {
       await redisCleanup();
@@ -75,42 +71,28 @@ export function redisRelayToMcpServer(sessionId: string, transport: Transport): 
   }
 
   const messagePromise = new Promise<JSONRPCMessage>((resolve) => {
-    console.log(`[redisRelayToMcpServer] Setting up transport.onmessage handler for session: ${sessionId}`);
     transport.onmessage = async (message, extra) => {
-      console.log(`[redisRelayToMcpServer] Received message from transport for session ${sessionId}:`, JSON.stringify(message));
-      
       // First, set up response subscription if needed
       if ("id" in message) {
-        console.log(`[redisRelayToMcpServer] Setting up response subscription for message ID: ${message.id}`);
         const toClientChannel = getToClientChannel(sessionId, message.id.toString());
-        console.log(`[redisRelayToMcpServer] Subscribing to response channel: ${toClientChannel}`);
 
         redisCleanup = await redisClient.createSubscription(toClientChannel, async (redisMessageJson) => {
-          console.log(`[redisRelayToMcpServer] Received response from Redis for session ${sessionId}:`, redisMessageJson.substring(0, 200));
           const redisMessage = JSON.parse(redisMessageJson) as RedisMessage;
           if (redisMessage.type === 'mcp') {
-            console.log(`[redisRelayToMcpServer] Sending response back to transport for session ${sessionId}`);
             await transport.send(redisMessage.message, redisMessage.options);
-            console.log(`[redisRelayToMcpServer] Response sent to transport for session ${sessionId}`);
           }
         }, (error) => {
-          console.error(`[redisRelayToMcpServer] Error in response subscription for session ${sessionId}:`, error);
           transport.onerror?.(error);
         });
-        console.log(`[redisRelayToMcpServer] Response subscription established for session ${sessionId}`);
-      } else {
-        console.log(`[redisRelayToMcpServer] Message is notification (no ID) for session ${sessionId}, skipping response subscription`);
       }
       
       // Now send the message to the MCP server
       await sendToMcpServer(sessionId, message, extra);
-      console.log(`[redisRelayToMcpServer] Sent message to MCP server for session ${sessionId}`);
       resolve(message);
     }
   });
 
   messagePromise.catch((error) => {
-    console.error(`[redisRelayToMcpServer] Error setting up relay for session ${sessionId}:`, error);
     transport.onerror?.(error);
     cleanup();
   });
@@ -140,20 +122,15 @@ export class ServerRedisTransport implements Transport {
     
     // Subscribe to MCP messages from clients
     const serverChannel = getToServerChannel(this._sessionId);
-    console.log(`[ServerRedisTransport.${this.counter}] Subscribing to server channel: ${serverChannel}`);
     this.serverCleanup = await redisClient.createSubscription(
       serverChannel,
       (messageJson) => {
-        console.log(`[ServerRedisTransport.${this.counter}] Received message from Redis:`, messageJson.substring(0, 200));
         const redisMessage = JSON.parse(messageJson) as RedisMessage;
         if (redisMessage.type === 'mcp') {
-          console.log(`[ServerRedisTransport.${this.counter}] Processing MCP message:`, JSON.stringify(redisMessage.message));
           this.onmessage?.(redisMessage.message, redisMessage.extra);
-          console.log(`[ServerRedisTransport.${this.counter}] MCP message processed`);
         }
       },
       (error) => {
-        console.error(`[ServerRedisTransport.${this.counter}] Server channel error:`, error);
         this.onerror?.(error);
       }
     );
@@ -181,14 +158,10 @@ export class ServerRedisTransport implements Transport {
   async send(message: JSONRPCMessage, options?: TransportSendOptions): Promise<void> {
     const relatedRequestId = options?.relatedRequestId?.toString() ?? "id" in message ? message.id : notificationStreamId;
     const channel = getToClientChannel(this._sessionId, relatedRequestId)
-    console.log(`[ServerRedisTransport.${this.counter}] Sending message to channel: ${channel}`);
-    console.log(`[ServerRedisTransport.${this.counter}] Message:`, JSON.stringify(message));
-    console.log(`[ServerRedisTransport.${this.counter}] Options:`, JSON.stringify(options));
 
     const redisMessage: RedisMessage = { type: 'mcp', message, options };
     const messageStr = JSON.stringify(redisMessage);
     await redisClient.publish(channel, messageStr);
-    console.log(`[ServerRedisTransport.${this.counter}] Message published to Redis`);
   }
 
   async close(): Promise<void> {
@@ -226,19 +199,14 @@ export async function startServerListeningToRedis(serverWrapper: { server: Serve
 }
 
 export async function getFirstShttpTransport(sessionId: string): Promise<{shttpTransport: StreamableHTTPServerTransport, cleanup: () => Promise<void>}> {
-  console.log(`[getFirstShttpTransport] Creating transport for session: ${sessionId}`);
   const shttpTransport = new StreamableHTTPServerTransport({
     sessionIdGenerator: () => sessionId,
     enableJsonResponse: true, // Enable JSON response mode
   });
   
-  console.log(`[getFirstShttpTransport] Created transport, sessionId: ${shttpTransport.sessionId}`);
-  
   // Use the new request-id based relay approach
-  console.log(`[getFirstShttpTransport] Setting up Redis relay for session: ${sessionId}`);
   const cleanup = redisRelayToMcpServer(sessionId, shttpTransport);
   
-  console.log(`[getFirstShttpTransport] Transport setup complete for session: ${sessionId}`);
   return { shttpTransport, cleanup };
 }
 

@@ -36,12 +36,7 @@ const baseSecurityHeaders = (req: express.Request, res: express.Response, next: 
 
 // simple logging middleware
 const logger = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.log(`${req.method} ${req.url}`);
   next();
-  // Log the response status code
-  res.on('finish', () => {
-    console.log(`Response status code: ${res.statusCode}`);
-  });
 };
 
 
