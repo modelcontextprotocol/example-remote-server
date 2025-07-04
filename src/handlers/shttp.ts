@@ -1,7 +1,7 @@
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { Request, Response } from "express";
-import { getFirstShttpTransport, getShttpTransport, isLive, RedisTransport, startServerListeningToRedis } from "../services/redisTransport.js";
+import { getFirstShttpTransport, getShttpTransport, isLive, startServerListeningToRedis } from "../services/redisTransport.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { randomUUID } from "crypto";
 import { createMcpServer } from "../services/mcp.js";
@@ -22,7 +22,7 @@ export async function handleStreamableHTTP(req: Request, res: Response) {
   console.log('Request headers:', JSON.stringify(req.headers, null, 2));
   
   let shttpTransport: StreamableHTTPServerTransport | undefined = undefined;
-  let redisTransport: RedisTransport | undefined = undefined;
+  let cleanup: (() => Promise<void>) | undefined = undefined;
   try {
     // Check for existing session ID
     const sessionId = req.headers['mcp-session-id'] as string | undefined;
@@ -31,9 +31,7 @@ export async function handleStreamableHTTP(req: Request, res: Response) {
     if (sessionId && await isLive(sessionId)) {
       console.log('Session is live, reusing existing transport for session:', sessionId);
       // Reuse existing transport
-      // const { shttpTransport, redisTransport } = await getShttpTransport(sessionId);
-      // destructuring to get both transports
-      ({ shttpTransport, redisTransport } = await getShttpTransport(sessionId));
+      ({ shttpTransport, cleanup } = await getShttpTransport(sessionId));
 
       console.log('Created transport for session:', sessionId);
       console.log('Retrieved transport from Redis for session:', sessionId);
@@ -49,7 +47,7 @@ export async function handleStreamableHTTP(req: Request, res: Response) {
       startServerListeningToRedis(server.server, sessionId)
       console.log('Started server listening to Redis for session:', sessionId);
       
-      ({ shttpTransport, redisTransport } = await getFirstShttpTransport(sessionId));
+      ({ shttpTransport, cleanup } = await getFirstShttpTransport(sessionId));
       console.log('Retrieved first transport for session:', sessionId);
       console.log('Transport object:', shttpTransport.constructor.name, 'sessionId:', shttpTransport.sessionId);
     } else {
@@ -101,7 +99,9 @@ export async function handleStreamableHTTP(req: Request, res: Response) {
     res.on('finish', async () => {
       console.log('HTTP response finished, closing transport');
       await shttpTransport?.close();
-      // await redisTransport?.close();
+      if (cleanup) {
+        await cleanup();
+      }
       console.log('Transport closed after response');
     });
     console.log('=== handleStreamableHTTP END ===');

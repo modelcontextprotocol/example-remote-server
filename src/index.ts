@@ -9,7 +9,6 @@ import { handleFakeAuthorize, handleFakeAuthorizeRedirect } from "./handlers/fak
 import { handleStreamableHTTP } from "./handlers/shttp.js";
 import { handleMessage, handleSSEConnection } from "./handlers/sse.js";
 import { redisClient } from "./redis.js";
-import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 
 const app = express();
 
