@@ -243,7 +243,7 @@ export async function exchangeToken(
 
   const tokenExchange: TokenExchange = JSON.parse(decoded);
   if (tokenExchange.alreadyUsed) {
-    console.error("1Duplicate use of authorization code detected; revoking tokens");
+    console.error("Duplicate use of authorization code detected; revoking tokens");
     await revokeMcpInstallation(tokenExchange.mcpAccessToken);
     throw new Error("Duplicate use of authorization code detected; tokens revoked");
   }

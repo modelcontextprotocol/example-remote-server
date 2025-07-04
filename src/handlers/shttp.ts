@@ -44,7 +44,7 @@ export async function handleStreamableHTTP(req: Request, res: Response) {
       const server = createMcpServer();
       console.log('Created MCP server instance');
       
-      startServerListeningToRedis(server.server, sessionId)
+      await startServerListeningToRedis(server, sessionId)
       console.log('Started server listening to Redis for session:', sessionId);
       
       ({ shttpTransport, cleanup } = await getFirstShttpTransport(sessionId));

@@ -153,10 +153,16 @@ describe("auth utils", () => {
       const first = await exchangeToken(authCode);
       expect(first).toBeDefined();
       
+      // Mock console.error to suppress expected error message
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      
       // Second exchange throws
       await expect(exchangeToken(authCode)).rejects.toThrow(
         "Duplicate use of authorization code detected"
       );
+      
+      // Restore console.error
+      consoleErrorSpy.mockRestore();
     });
     
     it("returns undefined for non-existent code", async () => {

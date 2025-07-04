@@ -5,7 +5,8 @@ import {
   ServerRedisTransport, 
   redisRelayToMcpServer,
   isLive,
-  startServerListeningToRedis
+  startServerListeningToRedis,
+  shutdownSession
 } from './redisTransport.js';
 import { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { createMcpServer } from './mcp.js';
@@ -60,6 +61,7 @@ describe('Redis Transport', () => {
 
       expect(mockSubscriber).toHaveBeenCalledWith(
         JSON.stringify({
+          type: 'mcp',
           message: responseMessage,
           options: { relatedRequestId: 123 }
         })
@@ -84,6 +86,7 @@ describe('Redis Transport', () => {
 
       expect(mockSubscriber).toHaveBeenCalledWith(
         JSON.stringify({
+          type: 'mcp',
           message: notificationMessage,
           options: undefined
         })
@@ -98,6 +101,55 @@ describe('Redis Transport', () => {
 
       expect(onCloseMock).toHaveBeenCalled();
     });
+
+    it('should respond to shutdown control messages', async () => {
+      await transport.start();
+      
+      const onCloseMock = jest.fn();
+      transport.onclose = onCloseMock;
+
+      // Send a shutdown control message
+      await shutdownSession(sessionId);
+
+      // Wait for async processing
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      expect(onCloseMock).toHaveBeenCalled();
+    });
+
+    it('should receive MCP messages from clients and call onmessage', async () => {
+      const onMessageMock = jest.fn();
+      transport.onmessage = onMessageMock;
+
+      await transport.start();
+
+      // Simulate client sending a message to server
+      const clientMessage: JSONRPCMessage = {
+        jsonrpc: '2.0',
+        id: 'test-req',
+        method: 'tools/list',
+        params: {}
+      };
+
+      await mockRedis.publish(
+        `mcp:shttp:toserver:${sessionId}`,
+        JSON.stringify({
+          type: 'mcp',
+          message: clientMessage,
+          extra: { authInfo: { token: 'test-token', clientId: 'test-client', scopes: [] } }
+        })
+      );
+
+      // Wait for async processing
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      expect(onMessageMock).toHaveBeenCalledWith(
+        clientMessage,
+        { authInfo: { token: 'test-token', clientId: 'test-client', scopes: [] } }
+      );
+
+      await transport.close();
+    });
   });
 
 
@@ -110,9 +162,9 @@ describe('Redis Transport', () => {
         onmessage: undefined,
         onclose: undefined,
         onerror: undefined,
-        send: jest.fn(),
-        close: jest.fn(),
-        start: jest.fn()
+        send: jest.fn(() => Promise.resolve()),
+        close: jest.fn(() => Promise.resolve()),
+        start: jest.fn(() => Promise.resolve())
       };
     });
 
@@ -128,7 +180,7 @@ describe('Redis Transport', () => {
       };
 
       // Trigger the onmessage handler
-      mockTransport.onmessage?.(requestMessage, { authInfo: { userId: 'test' } });
+      mockTransport.onmessage?.(requestMessage, { authInfo: { token: 'test-token', clientId: 'test-client', scopes: [] } });
 
       // Wait a bit for async processing
       await new Promise(resolve => setTimeout(resolve, 10));
@@ -158,7 +210,7 @@ describe('Redis Transport', () => {
       };
 
       // Trigger the onmessage handler
-      mockTransport.onmessage?.(requestMessage, { authInfo: { userId: 'test' } });
+      mockTransport.onmessage?.(requestMessage, { authInfo: { token: 'test-token', clientId: 'test-client', scopes: [] } });
 
       // Wait for subscription setup
       await new Promise(resolve => setTimeout(resolve, 10));
@@ -173,6 +225,7 @@ describe('Redis Transport', () => {
       await mockRedis.publish(
         `mcp:shttp:toclient:${sessionId}:req-456`,
         JSON.stringify({
+          type: 'mcp',
           message: responseMessage,
           options: undefined
         })
@@ -229,24 +282,32 @@ describe('Redis Transport', () => {
     const sessionId = 'test-session-server';
 
     it('should connect server with ServerRedisTransport', async () => {
-      const { server } = createMcpServer();
-      const connectSpy = jest.spyOn(server, 'connect');
+      const serverWrapper = createMcpServer();
+      const connectSpy = jest.spyOn(serverWrapper.server, 'connect');
 
-      await startServerListeningToRedis(server, sessionId);
+      await startServerListeningToRedis(serverWrapper, sessionId);
 
       expect(connectSpy).toHaveBeenCalledWith(
         expect.any(ServerRedisTransport)
       );
+
+      // Clean up properly
+      await shutdownSession(sessionId);
+      await new Promise(resolve => setTimeout(resolve, 10));
     });
 
-    it('should create transport that can send responses', async () => {
-      const { server } = createMcpServer();
+    it('should create transport that can send responses and shutdown properly', async () => {
+      const serverWrapper = createMcpServer();
       
-      await startServerListeningToRedis(server, sessionId);
+      const transport = await startServerListeningToRedis(serverWrapper, sessionId);
 
       // The server should now be connected and able to handle requests via Redis
-      // This is tested implicitly by the connection succeeding
-      expect(server).toBeDefined();
+      expect(serverWrapper.server).toBeDefined();
+      expect(transport).toBeInstanceOf(ServerRedisTransport);
+
+      // Test proper shutdown
+      await shutdownSession(sessionId);
+      await new Promise(resolve => setTimeout(resolve, 10));
     });
   });
 
@@ -259,9 +320,9 @@ describe('Redis Transport', () => {
         onmessage: undefined,
         onclose: undefined,
         onerror: undefined,
-        send: jest.fn(),
-        close: jest.fn(),
-        start: jest.fn()
+        send: jest.fn(() => Promise.resolve()),
+        close: jest.fn(() => Promise.resolve()),
+        start: jest.fn(() => Promise.resolve())
       };
 
       const cleanup = redisRelayToMcpServer(sessionId, clientTransport);
@@ -291,6 +352,7 @@ describe('Redis Transport', () => {
       // Verify the message was published to server channel
       expect(serverSubscriber).toHaveBeenCalledWith(
         JSON.stringify({
+          type: 'mcp',
           message: listToolsRequest,
           extra: undefined,
           options: undefined
@@ -307,6 +369,7 @@ describe('Redis Transport', () => {
       await mockRedis.publish(
         `mcp:shttp:toclient:${sessionId}:integration-req-1`,
         JSON.stringify({
+          type: 'mcp',
           message: serverResponse,
           options: undefined
         })
@@ -319,6 +382,44 @@ describe('Redis Transport', () => {
       expect(clientTransport.send).toHaveBeenCalledWith(serverResponse, undefined);
 
       await cleanup();
+    });
+  });
+
+  describe('Control Messages', () => {
+    const sessionId = 'test-control-session';
+
+    it('should send shutdown control messages', async () => {
+      const controlSubscriber = jest.fn();
+      await mockRedis.createSubscription(
+        `mcp:control:${sessionId}`,
+        controlSubscriber,
+        jest.fn()
+      );
+
+      await shutdownSession(sessionId);
+
+      const callArgs = controlSubscriber.mock.calls[0][0] as string;
+      const message = JSON.parse(callArgs);
+      
+      expect(message.type).toBe('control');
+      expect(message.action).toBe('SHUTDOWN');
+      expect(typeof message.timestamp).toBe('number');
+    });
+
+    it('should properly shutdown server transport via control message', async () => {
+      const transport = new ServerRedisTransport(sessionId);
+      const onCloseMock = jest.fn();
+      transport.onclose = onCloseMock;
+
+      await transport.start();
+
+      // Send shutdown signal
+      await shutdownSession(sessionId);
+      
+      // Wait for async processing
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      expect(onCloseMock).toHaveBeenCalled();
     });
   });
 });

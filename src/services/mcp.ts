@@ -95,7 +95,12 @@ enum PromptName {
   RESOURCE = "resource_prompt",
 }
 
-export const createMcpServer = () => {
+interface McpServerWrapper {
+  server: Server;
+  cleanup: () => void;
+}
+
+export const createMcpServer = (): McpServerWrapper => {
   const server = new Server(
     {
       name: "example-servers/everything",
