@@ -27,4 +27,5 @@ export interface McpInstallation {
   mcpTokens: OAuthTokens;
   clientId: string;
   issuedAt: number;
+  userId: string; // Unique identifier for the user (not client)
 }
