@@ -156,7 +156,7 @@ export class ServerRedisTransport implements Transport {
   }
 
   async send(message: JSONRPCMessage, options?: TransportSendOptions): Promise<void> {
-    const relatedRequestId = options?.relatedRequestId?.toString() ?? "id" in message ? message.id : notificationStreamId;
+    const relatedRequestId = options?.relatedRequestId?.toString() ?? ("id" in message ? message.id?.toString() : notificationStreamId);
     const channel = getToClientChannel(this._sessionId, relatedRequestId)
 
     const redisMessage: RedisMessage = { type: 'mcp', message, options };

@@ -1,7 +1,7 @@
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { Request, Response } from "express";
-import { getFirstShttpTransport, getShttpTransport, isLive, startServerListeningToRedis } from "../services/redisTransport.js";
+import { getFirstShttpTransport, getShttpTransport, isLive, shutdownSession, startServerListeningToRedis } from "../services/redisTransport.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { randomUUID } from "crypto";
 import { createMcpServer } from "../services/mcp.js";
@@ -20,6 +20,47 @@ export async function handleStreamableHTTP(req: Request, res: Response) {
   let shttpTransport: StreamableHTTPServerTransport | undefined = undefined;
   let cleanup: (() => Promise<void>) | undefined = undefined;
   try {
+    // Handle DELETE requests for session termination
+    if (req.method === 'DELETE') {
+      const sessionId = req.headers['mcp-session-id'] as string | undefined;
+      
+      if (!sessionId) {
+        res.status(400).json({
+          jsonrpc: '2.0',
+          error: {
+            code: -32000,
+            message: 'Bad Request: Session ID required for DELETE request',
+          },
+          id: null,
+        });
+        return;
+      }
+
+      // Check if session exists
+      if (!(await isLive(sessionId))) {
+        res.status(404).json({
+          jsonrpc: '2.0',
+          error: {
+            code: -32001,
+            message: 'Session not found',
+          },
+          id: null,
+        });
+        return;
+      }
+
+      // Send shutdown control message to terminate the session
+      await shutdownSession(sessionId);
+
+      // Respond with success
+      res.status(200).json({
+        jsonrpc: '2.0',
+        result: { status: 'Session terminated successfully' },
+        id: null,
+      });
+      return;
+    }
+
     // Check for existing session ID
     const sessionId = req.headers['mcp-session-id'] as string | undefined;
 
@@ -32,7 +73,7 @@ export async function handleStreamableHTTP(req: Request, res: Response) {
       
       const server = createMcpServer();
       
-      await startServerListeningToRedis(server, sessionId)
+      await startServerListeningToRedis(server, sessionId);
       
       ({ shttpTransport, cleanup } = await getFirstShttpTransport(sessionId));
     } else {
