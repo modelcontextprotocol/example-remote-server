@@ -53,6 +53,7 @@ function getMockAuthValues() {
     },
     clientId: client.client_id,
     issuedAt: Date.now() / 1000,
+    userId: "test-user-id",
   };
 
   return {
@@ -279,6 +280,7 @@ describe("EverythingAuthProvider", () => {
         },
         clientId: "different-client-id",
         issuedAt: Date.now() / 1000,
+    userId: "test-user-id",
       };
       
       await authService.saveRefreshToken(refreshToken, accessToken);
@@ -314,6 +316,7 @@ describe("EverythingAuthProvider", () => {
         },
         clientId: "client-id",
         issuedAt: Date.now() / 1000,
+    userId: "test-user-id",
       };
       
       await authService.saveMcpInstallation(accessToken, mcpInstallation);
@@ -351,6 +354,7 @@ describe("EverythingAuthProvider", () => {
         },
         clientId: "client-id",
         issuedAt: twoDaysAgoInSeconds, // 2 days ago, with 1-day expiry
+        userId: "test-user-id",
       };
       
       await authService.saveMcpInstallation(accessToken, mcpInstallation);
@@ -377,6 +381,7 @@ describe("EverythingAuthProvider", () => {
         },
         clientId: client.client_id,
         issuedAt: Date.now() / 1000,
+    userId: "test-user-id",
       };
       
       // Save the installation

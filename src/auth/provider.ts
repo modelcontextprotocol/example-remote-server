@@ -72,22 +72,196 @@ export class EverythingAuthProvider implements OAuthServerProvider {
     // You can redirect to another page, or you can send an html response directly
     // res.redirect(new URL(`fakeupstreamauth/authorize?metadata=${authorizationCode}`, BASE_URI).href);
 
+    // Set permissive CSP for styling
+    res.setHeader('Content-Security-Policy', [
+      "default-src 'self'",
+      "style-src 'self' 'unsafe-inline'",
+      "script-src 'self' 'unsafe-inline'",
+      "img-src 'self' data:",
+      "object-src 'none'",
+      "frame-ancestors 'none'",
+      "form-action 'self'",
+      "base-uri 'self'"
+    ].join('; '));
+
     res.send(`
-      <html>
+      <!DOCTYPE html>
+      <html lang="en">
         <head>
-          <title>MCP Auth Page</title>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>MCP Server Authorization</title>
+          <style>
+            * {
+              margin: 0;
+              padding: 0;
+              box-sizing: border-box;
+            }
+            
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+              background: #000000;
+              color: #ffffff;
+              min-height: 100vh;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              padding: 20px;
+            }
+            
+            .auth-container {
+              background: #ffffff;
+              color: #000000;
+              border-radius: 16px;
+              box-shadow: 0 20px 40px rgba(255, 255, 255, 0.1);
+              padding: 40px;
+              max-width: 500px;
+              width: 100%;
+              text-align: center;
+              border: 1px solid #e2e8f0;
+            }
+            
+            .logo-container {
+              margin-bottom: 32px;
+            }
+            
+            .logo {
+              width: 80px;
+              height: 80px;
+              margin: 0 auto 16px;
+              filter: invert(1);
+            }
+            
+            .mcp-title {
+              font-size: 24px;
+              font-weight: 700;
+              color: #000000;
+              margin-bottom: 8px;
+              letter-spacing: 2px;
+            }
+            
+            h1 {
+              color: #000000;
+              font-size: 32px;
+              font-weight: 800;
+              margin-bottom: 12px;
+              line-height: 1.2;
+            }
+            
+            .subtitle {
+              color: #4a5568;
+              font-size: 18px;
+              margin-bottom: 32px;
+              line-height: 1.5;
+            }
+            
+            .client-info {
+              background: #f8f9fa;
+              border-radius: 12px;
+              padding: 24px;
+              margin-bottom: 32px;
+              border: 2px solid #e2e8f0;
+            }
+            
+            .client-info h3 {
+              color: #2d3748;
+              font-size: 18px;
+              font-weight: 600;
+              margin-bottom: 16px;
+            }
+            
+            .client-id {
+              background: white;
+              border: 2px solid #e2e8f0;
+              border-radius: 8px;
+              padding: 12px;
+              font-family: 'Courier New', monospace;
+              font-size: 14px;
+              color: #4a5568;
+              word-break: break-all;
+            }
+            
+            .auth-flow-info {
+              background: #f8f9fa;
+              border-radius: 12px;
+              padding: 24px;
+              margin-bottom: 32px;
+              border-left: 4px solid #000000;
+            }
+            
+            .auth-flow-info h3 {
+              color: #2d3748;
+              font-size: 18px;
+              font-weight: 600;
+              margin-bottom: 12px;
+            }
+            
+            .auth-flow-info p {
+              color: #4a5568;
+              font-size: 14px;
+              line-height: 1.5;
+            }
+            
+            .btn-primary {
+              background: #000000;
+              color: #ffffff;
+              font-size: 18px;
+              font-weight: 700;
+              padding: 18px 36px;
+              border: none;
+              border-radius: 8px;
+              cursor: pointer;
+              transition: all 0.2s ease;
+              width: 100%;
+              text-decoration: none;
+              display: inline-block;
+              text-align: center;
+              letter-spacing: 1px;
+            }
+            
+            .btn-primary:hover {
+              background: #333333;
+              transform: translateY(-2px);
+              box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+            }
+            
+            .branding {
+              margin-top: 24px;
+              padding-top: 24px;
+              border-top: 1px solid #e2e8f0;
+              color: #718096;
+              font-size: 12px;
+            }
+          </style>
         </head>
         <body>
-          <h1>MCP Server Auth Page</h1>
-          <p>
-            This page is the authorization page presented by the MCP server, routing the user upstream. This is only 
-            needed on 2025-03-26 Auth spec, where the MCP server acts as it's own authoriztion server. This page should
-            be present to avoid confused deputy attacks.
-          </p>
-          <p>
-            Click <a href="/fakeupstreamauth/authorize?redirect_uri=/fakeupstreamauth/callback&state=${authorizationCode}">here</a> 
-            to continue to the upstream auth
-          </p>
+          <div class="auth-container">
+            <div class="logo-container">
+              <img src="/mcp-logo.png" alt="MCP Logo" class="logo">
+              <div class="mcp-title">MCP</div>
+            </div>
+            
+            <h1>Authorization Required</h1>
+            <p class="subtitle">This client wants to connect to your MCP server</p>
+            
+            <div class="client-info">
+              <h3>Client Application</h3>
+              <div class="client-id">${client.client_id}</div>
+            </div>
+            
+            <div class="auth-flow-info">
+              <h3>What happens next?</h3>
+              <p>You'll be redirected to authenticate with the upstream provider. Once verified, you'll be granted access to this MCP server's resources.</p>
+            </div>
+            
+            <a href="/fakeupstreamauth/authorize?redirect_uri=/fakeupstreamauth/callback&state=${authorizationCode}" class="btn-primary">
+              Continue to Authentication
+            </a>
+            
+            <div class="branding">
+              Model Context Protocol (MCP) Server
+            </div>
+          </div>
         </body>
       </html>
     `);
@@ -156,6 +330,7 @@ export class EverythingAuthProvider implements OAuthServerProvider {
       ...mcpInstallation,
       mcpTokens: newTokens,
       issuedAt: Date.now() / 1000,
+      userId: mcpInstallation.userId, // Preserve the user ID
     });
 
     return newTokens;
@@ -183,7 +358,10 @@ export class EverythingAuthProvider implements OAuthServerProvider {
       token,
       clientId: installation.clientId,
       scopes: ['mcp'],
-      expiresAt
+      expiresAt,
+      extra: {
+        userId: installation.userId
+      }
     };
   }
 

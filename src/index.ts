@@ -36,6 +36,11 @@ const baseSecurityHeaders = (req: express.Request, res: express.Response, next: 
 
 // simple logging middleware
 const logger = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.log(`${new Date().toISOString()} ${req.method} ${req.url}`);
+  if (req.url.includes('/mcp')) {
+    console.log('  Headers:', JSON.stringify(req.headers, null, 2));
+    console.log('  Body:', JSON.stringify(req.body, null, 2));
+  }
   next();
 };
 
@@ -106,7 +111,12 @@ app.get("/mcp", cors(corsOptions), bearerAuth, authContext, handleStreamableHTTP
 app.post("/mcp", cors(corsOptions), bearerAuth, authContext, handleStreamableHTTP);
 app.delete("/mcp", cors(corsOptions), bearerAuth, authContext, handleStreamableHTTP);
 
-// Upstream auth routes
+// Static assets
+app.get("/mcp-logo.png", (req, res) => {
+  res.sendFile("mcp.png", { root: "." });
+});
+
+// Upstream auth routes  
 app.get("/fakeupstreamauth/authorize", cors(corsOptions), handleFakeAuthorize);
 app.get("/fakeupstreamauth/callback", cors(corsOptions), handleFakeAuthorizeRedirect);
 

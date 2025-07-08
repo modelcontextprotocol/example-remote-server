@@ -193,6 +193,7 @@ describe("auth utils", () => {
         },
         clientId: "client-id",
         issuedAt: Date.now() / 1000,
+    userId: "test-user-id",
       }
 
       await saveMcpInstallation(accessToken, mcpInstallation);
@@ -239,6 +240,7 @@ describe("auth utils", () => {
         },
         clientId: "client-id",
         issuedAt: Date.now() / 1000,
+    userId: "test-user-id",
       });
       
       const getDel = jest.spyOn(mockRedis, 'getDel').mockImplementationOnce(() => {
@@ -252,6 +254,7 @@ describe("auth utils", () => {
           },
           clientId: "client-id",
           issuedAt: Date.now() / 1000,
+    userId: "test-user-id",
         };
         const value = JSON.stringify(mcpInstallation);
         const iv = crypto.randomBytes(16);

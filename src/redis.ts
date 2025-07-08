@@ -142,7 +142,7 @@ export class MockRedisClient implements RedisClient {
   options = { url: "redis://localhost:6379" };
   private store = new Map<string, string>();
   private lists = new Map<string, string[]>();
-  private subscribers = new Map<string, ((message: string) => void)[]>();
+  public subscribers = new Map<string, ((message: string) => void)[]>(); // Public for testing access
   private errorCallbacks = new Map<string, ((error: Error) => void)[]>();
 
   async get(key: string): Promise<string | null> {
