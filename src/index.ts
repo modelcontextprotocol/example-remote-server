@@ -36,11 +36,14 @@ const baseSecurityHeaders = (req: express.Request, res: express.Response, next: 
 
 // simple logging middleware
 const logger = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  // if GET and /mcp, log the body returned
   console.log(`${new Date().toISOString()} ${req.method} ${req.url}`);
-  if (req.url.includes('/mcp')) {
-    console.log('  Headers:', JSON.stringify(req.headers, null, 2));
+  if (req.method === 'GET' && req.url.includes('/mcp')) {
     console.log('  Body:', JSON.stringify(req.body, null, 2));
   }
+  res.on('finish', () => {
+    console.log('  Response:', res.statusCode);
+  });
   next();
 };
 
