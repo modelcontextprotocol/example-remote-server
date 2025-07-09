@@ -3,7 +3,6 @@ import { redisClient } from "../redis.js";
 import { Transport, TransportSendOptions } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { JSONRPCMessage, MessageExtraInfo } from "@modelcontextprotocol/sdk/types.js";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 
 let redisTransportCounter = 0;
 const notificationStreamId = "__GET_stream";
@@ -58,6 +57,27 @@ export async function isLive(sessionId: string): Promise<boolean> {
   // Check if the session is live by checking if the key exists in Redis
   const numSubs = await redisClient.numsub(getToServerChannel(sessionId));
   return numSubs > 0;
+}
+
+export async function setSessionOwner(sessionId: string, userId: string): Promise<void> {
+  await redisClient.set(`session:${sessionId}:owner`, userId);
+}
+
+export async function getSessionOwner(sessionId: string): Promise<string | null> {
+  return await redisClient.get(`session:${sessionId}:owner`);
+}
+
+export async function validateSessionOwnership(sessionId: string, userId: string): Promise<boolean> {
+  const owner = await getSessionOwner(sessionId);
+  return owner === userId;
+}
+
+export async function isSessionOwnedBy(sessionId: string, userId: string): Promise<boolean> {
+  const isLiveSession = await isLive(sessionId);
+  if (!isLiveSession) {
+    return false;
+  }
+  return await validateSessionOwnership(sessionId, userId);
 }
 
 
@@ -182,45 +202,16 @@ export class ServerRedisTransport implements Transport {
   }
 }
 
-export async function startServerListeningToRedis(serverWrapper: { server: Server; cleanup: () => void }, sessionId: string): Promise<ServerRedisTransport> {
-  const serverRedisTransport = new ServerRedisTransport(sessionId);
-  
-  // Add cleanup callback to the transport
-  const originalClose = serverRedisTransport.close.bind(serverRedisTransport);
-  serverRedisTransport.close = async () => {
-    serverWrapper.cleanup();
-    await originalClose();
-  };
-  
-  // The server.connect() will call start() on the transport
-  await serverWrapper.server.connect(serverRedisTransport)
-  
-  return serverRedisTransport;
-}
-
-export async function getFirstShttpTransport(sessionId: string): Promise<{shttpTransport: StreamableHTTPServerTransport, cleanup: () => Promise<void>}> {
-  const shttpTransport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: () => sessionId,
-    enableJsonResponse: true, // Enable JSON response mode
-  });
-  
-  // Use the new request-id based relay approach
-  const cleanup = redisRelayToMcpServer(sessionId, shttpTransport);
-  
-  return { shttpTransport, cleanup };
-}
-
-export async function getShttpTransport(sessionId: string): Promise<{shttpTransport: StreamableHTTPServerTransport, cleanup: () => Promise<void>}> {
+export async function getShttpTransport(sessionId: string): Promise<StreamableHTTPServerTransport> {
   // Giving undefined here and setting the sessionId means the 
   // transport wont try to create a new session.
   const shttpTransport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
-    enableJsonResponse: true, // Use JSON response mode for all requests
   })
   shttpTransport.sessionId = sessionId;
 
   // Use the new request-id based relay approach
   const cleanup = redisRelayToMcpServer(sessionId, shttpTransport);
-  
-  return { shttpTransport, cleanup };
+  shttpTransport.onclose = cleanup; 
+  return shttpTransport;
 }
