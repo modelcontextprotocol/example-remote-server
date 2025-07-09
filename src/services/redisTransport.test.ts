@@ -5,8 +5,11 @@ import {
   ServerRedisTransport, 
   redisRelayToMcpServer,
   isLive,
-  startServerListeningToRedis,
-  shutdownSession
+  shutdownSession,
+  setSessionOwner,
+  getSessionOwner,
+  validateSessionOwnership,
+  isSessionOwnedBy
 } from './redisTransport.js';
 import { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { createMcpServer } from './mcp.js';
@@ -278,36 +281,45 @@ describe('Redis Transport', () => {
     });
   });
 
-  describe('startServerListeningToRedis', () => {
-    const sessionId = 'test-session-server';
+  describe('Session Ownership', () => {
+    const sessionId = 'test-session-ownership';
+    const userId = 'test-user-123';
 
-    it('should connect server with ServerRedisTransport', async () => {
-      const serverWrapper = createMcpServer();
-      const connectSpy = jest.spyOn(serverWrapper.server, 'connect');
-
-      await startServerListeningToRedis(serverWrapper, sessionId);
-
-      expect(connectSpy).toHaveBeenCalledWith(
-        expect.any(ServerRedisTransport)
-      );
-
-      // Clean up properly
-      await shutdownSession(sessionId);
-      await new Promise(resolve => setTimeout(resolve, 10));
+    it('should set and get session owner', async () => {
+      await setSessionOwner(sessionId, userId);
+      const owner = await getSessionOwner(sessionId);
+      expect(owner).toBe(userId);
     });
 
-    it('should create transport that can send responses and shutdown properly', async () => {
-      const serverWrapper = createMcpServer();
+    it('should validate session ownership correctly', async () => {
+      await setSessionOwner(sessionId, userId);
       
-      const transport = await startServerListeningToRedis(serverWrapper, sessionId);
+      expect(await validateSessionOwnership(sessionId, userId)).toBe(true);
+      expect(await validateSessionOwnership(sessionId, 'different-user')).toBe(false);
+    });
 
-      // The server should now be connected and able to handle requests via Redis
-      expect(serverWrapper.server).toBeDefined();
-      expect(transport).toBeInstanceOf(ServerRedisTransport);
-
-      // Test proper shutdown
-      await shutdownSession(sessionId);
-      await new Promise(resolve => setTimeout(resolve, 10));
+    it('should check if session is owned by user including liveness', async () => {
+      // Session not live yet
+      expect(await isSessionOwnedBy(sessionId, userId)).toBe(false);
+      
+      // Make session live
+      await mockRedis.createSubscription(
+        `mcp:shttp:toserver:${sessionId}`,
+        jest.fn(),
+        jest.fn()
+      );
+      
+      // Still false because no owner set
+      expect(await isSessionOwnedBy(sessionId, userId)).toBe(false);
+      
+      // Set owner
+      await setSessionOwner(sessionId, userId);
+      
+      // Now should be true
+      expect(await isSessionOwnedBy(sessionId, userId)).toBe(true);
+      
+      // False for different user
+      expect(await isSessionOwnedBy(sessionId, 'different-user')).toBe(false);
     });
   });
 

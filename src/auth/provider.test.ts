@@ -24,7 +24,8 @@ function createMockResponse() {
     redirect: jest.fn().mockReturnThis(),
     status: jest.fn().mockReturnThis(),
     json: jest.fn().mockReturnThis(),
-    send: jest.fn().mockReturnThis()
+    send: jest.fn().mockReturnThis(),
+    setHeader: jest.fn().mockReturnThis()
   };
   return res as unknown as jest.Mocked<Response>;
 }
@@ -136,7 +137,8 @@ describe("EverythingAuthProvider", () => {
       // Verify HTML sent with redirect
       expect(res.send).toHaveBeenCalled();
       const sentHtml = (res.send as jest.Mock).mock.calls[0][0];
-      expect(sentHtml).toContain('MCP Auth Page');
+      expect(sentHtml).toContain('MCP Server Authorization');
+      expect(sentHtml).toContain('Authorization Required');
       expect(sentHtml).toContain('fakeupstreamauth/authorize?redirect_uri=/fakeupstreamauth/callback&state=');
     });
   });
@@ -328,6 +330,9 @@ describe("EverythingAuthProvider", () => {
         clientId: mcpInstallation.clientId,
         scopes: ['mcp'],
         expiresAt: mcpInstallation.mcpTokens.expires_in! + mcpInstallation.issuedAt,
+        extra: {
+          userId: "test-user-id"
+        }
       });
     });
     

@@ -59,7 +59,7 @@ export async function handleStreamableHTTP(req: Request, res: Response) {
         await setSessionOwner(sessionId, userId);
       }
 
-      const onsessionclosed = async (sessionId: string) => {
+      const onsessionclosed = (sessionId: string) => {
         console.log(`Session ${sessionId} closing`);
         void shutdownSession(sessionId);
         console.log(`Session ${sessionId} closed`);

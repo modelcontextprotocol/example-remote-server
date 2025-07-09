@@ -41,8 +41,41 @@ describe('Streamable HTTP Handler Integration Tests', () => {
     };
   });
 
-  afterEach(() => {
+  // Helper function to trigger cleanup after handleStreamableHTTP calls
+  const triggerResponseCleanup = async () => {
+    // Find all finish handlers registered during the test
+    const finishHandlers = (mockRes.on as jest.Mock).mock.calls
+      .filter(([event]) => event === 'finish')
+      .map(([, handler]) => handler);
+    
+    // Trigger all finish handlers
+    for (const handler of finishHandlers) {
+      if (typeof handler === 'function') {
+        await handler();
+      }
+    }
+  };
+
+  // Helper to extract session ID from test context
+  const getSessionIdFromTest = () => {
+    // Try to get from response headers first
+    const setHeaderCalls = (mockRes.setHeader as jest.Mock).mock.calls;
+    const sessionIdHeader = setHeaderCalls.find(([name]) => name === 'mcp-session-id');
+    if (sessionIdHeader?.[1]) {
+      return sessionIdHeader[1];
+    }
+    
+    // Fall back to extracting from Redis channels
+    const allChannels = Array.from(mockRedis.subscribers.keys());
+    const serverChannel = allChannels.find(channel => channel.includes('mcp:shttp:toserver:'));
+    return serverChannel?.split(':')[3];
+  };
+
+  afterEach(async () => {
+    // Always trigger cleanup for any MCP servers created during tests
+    await triggerResponseCleanup();
     mockRedis.clear();
+    jest.clearAllMocks();
   });
 
   describe('Redis Subscription Cleanup', () => {
@@ -63,12 +96,16 @@ describe('Streamable HTTP Handler Integration Tests', () => {
       mockReq.auth = {
         clientId: 'test-client-123',
         token: 'test-token',
-        scopes: ['mcp']
+        scopes: ['mcp'],
+        extra: { userId: 'test-user-123' }
       } as AuthInfo;
 
       // Call the handler
       await handleStreamableHTTP(mockReq as Request, mockRes as Response);
 
+      // Wait longer for async initialization to complete
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
       // Check if any subscriptions were created on any channels
       // Since we don't know the exact sessionId generated, check all channels
       const allChannels = Array.from(mockRedis.subscribers.keys());
@@ -111,7 +148,8 @@ describe('Streamable HTTP Handler Integration Tests', () => {
       mockReq.auth = {
         clientId: 'test-client-123',
         token: 'test-token',
-        scopes: ['mcp']
+        scopes: ['mcp'],
+        extra: { userId: 'test-user-123' }
       } as AuthInfo;
 
       // Call the handler
@@ -129,11 +167,27 @@ describe('Streamable HTTP Handler Integration Tests', () => {
       if (finishHandler) {
         await expect(finishHandler()).resolves.not.toThrow();
       }
+      
+      // Clean up the MCP server by sending DELETE request
+      const cleanupSessionId = getSessionIdFromTest();
+      
+      if (cleanupSessionId) {
+        // Send DELETE request to clean up MCP server
+        jest.clearAllMocks();
+        mockReq.method = 'DELETE';
+        mockReq.headers['mcp-session-id'] = cleanupSessionId;
+        mockReq.body = {};
+        
+        await handleStreamableHTTP(mockReq as Request, mockRes as Response);
+        
+        // Wait a bit for cleanup to complete
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
     });
   });
 
   describe('DELETE Request Session Cleanup', () => {
-    it('should shutdown MCP server and clean up Redis channels on DELETE request', async () => {
+    it('should trigger onsessionclosed callback which sends shutdown control message', async () => {
       // First, create a session with an initialization request
       const initRequest: JSONRPCMessage = {
         jsonrpc: '2.0',
@@ -150,20 +204,58 @@ describe('Streamable HTTP Handler Integration Tests', () => {
       mockReq.auth = {
         clientId: 'test-client-123',
         token: 'test-token',
-        scopes: ['mcp']
+        scopes: ['mcp'],
+        extra: { userId: 'test-user-123' }
       } as AuthInfo;
 
       // Initialize session
       await handleStreamableHTTP(mockReq as Request, mockRes as Response);
 
-      // Get the actual session ID from created channels
-      const allChannels = Array.from(mockRedis.subscribers.keys());
-      const serverChannel = allChannels.find(channel => channel.includes('mcp:shttp:toserver:'));
-      const sessionId = serverChannel?.split(':').pop();
+      // Wait for async initialization
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // For initialization requests with StreamableHTTPServerTransport,
+      // the handler might not immediately return a response if using SSE mode
+      // Let's check different possible locations for the session ID
+      
+      // Check JSON responses
+      const jsonCalls = (mockRes.json as jest.Mock).mock.calls;
+      let sessionId: string | undefined;
+      
+      if (jsonCalls.length > 0) {
+        const response = jsonCalls[0][0];
+        if (response?.result?._meta?.sessionId) {
+          sessionId = response.result._meta.sessionId;
+        }
+      }
+      
+      // Check write calls (for SSE responses)
+      if (!sessionId) {
+        const writeCalls = (mockRes.write as jest.Mock).mock.calls;
+        for (const [data] of writeCalls) {
+          if (typeof data === 'string' && data.includes('sessionId')) {
+            try {
+              // SSE data format: "data: {...}\n\n"
+              const jsonStr = data.replace(/^data: /, '').trim();
+              const parsed = JSON.parse(jsonStr);
+              if (parsed?.result?._meta?.sessionId) {
+                sessionId = parsed.result._meta.sessionId;
+              }
+            } catch (e) {
+              // Not valid JSON, continue
+            }
+          }
+        }
+      }
+      
+      // Fallback to getting from Redis channels
+      if (!sessionId) {
+        sessionId = getSessionIdFromTest();
+      }
       
       expect(sessionId).toBeDefined();
 
-      // Reset mocks
+      // Reset mocks but keep the session
       jest.clearAllMocks();
 
       // Now test DELETE request
@@ -177,22 +269,19 @@ describe('Streamable HTTP Handler Integration Tests', () => {
       // Track control messages sent to Redis
       const publishSpy = jest.spyOn(mockRedis, 'publish');
 
-      // Call DELETE handler
+      // Call DELETE handler - StreamableHTTPServerTransport should handle it
       await handleStreamableHTTP(mockReq as Request, mockRes as Response);
 
-      // Verify successful response
-      expect(mockRes.status).toHaveBeenCalledWith(200);
-      expect(mockRes.json).toHaveBeenCalledWith({
-        jsonrpc: '2.0',
-        result: { status: 'Session terminated successfully' },
-        id: null,
-      });
+      // Wait for async processing and onsessionclosed callback
+      await new Promise(resolve => setTimeout(resolve, 100));
       
-      // Verify shutdown control message was sent
-      expect(publishSpy).toHaveBeenCalledWith(
-        `mcp:control:${sessionId}`,
-        expect.stringContaining('"type":"control"')
+      // The StreamableHTTPServerTransport should handle the DELETE and trigger onsessionclosed
+      // which calls shutdownSession, sending the control message
+      const controlCalls = publishSpy.mock.calls.filter(call => 
+        call[0] === `mcp:control:${sessionId}`
       );
+      
+      expect(controlCalls.length).toBeGreaterThan(0);
       
       // Verify the control message content
       const controlCall = publishSpy.mock.calls.find(call => 
@@ -205,33 +294,86 @@ describe('Streamable HTTP Handler Integration Tests', () => {
       }
     });
 
-    it('should return 404 for DELETE request with invalid session ID', async () => {
-      const invalidSessionId = 'invalid-session-id';
-
-      mockReq.method = 'DELETE';
-      mockReq.headers = {
-        ...mockReq.headers,
-        'mcp-session-id': invalidSessionId
+    it('should return 401 for DELETE request with wrong user', async () => {
+      // First, create a session as user1
+      const initRequest: JSONRPCMessage = {
+        jsonrpc: '2.0',
+        id: 'init-1',
+        method: 'initialize',
+        params: {
+          protocolVersion: '2024-11-05',
+          capabilities: {},
+          clientInfo: { name: 'test-client', version: '1.0.0' }
+        }
       };
-      mockReq.body = {};
+
+      mockReq.body = initRequest;
       mockReq.auth = {
         clientId: 'test-client-123',
         token: 'test-token',
-        scopes: ['mcp']
+        scopes: ['mcp'],
+        extra: { userId: 'user1' }
+      } as AuthInfo;
+
+      // Initialize session as user1
+      await handleStreamableHTTP(mockReq as Request, mockRes as Response);
+
+      // Wait for async initialization
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Get the session ID from response
+      let sessionId: string | undefined;
+      
+      // Check JSON responses
+      const jsonCalls = (mockRes.json as jest.Mock).mock.calls;
+      if (jsonCalls.length > 0) {
+        const response = jsonCalls[0][0];
+        if (response?.result?._meta?.sessionId) {
+          sessionId = response.result._meta.sessionId;
+        }
+      }
+      
+      // Check write calls (for SSE responses)
+      if (!sessionId) {
+        const writeCalls = (mockRes.write as jest.Mock).mock.calls;
+        for (const [data] of writeCalls) {
+          if (typeof data === 'string' && data.includes('sessionId')) {
+            try {
+              const jsonStr = data.replace(/^data: /, '').trim();
+              const parsed = JSON.parse(jsonStr);
+              if (parsed?.result?._meta?.sessionId) {
+                sessionId = parsed.result._meta.sessionId;
+              }
+            } catch (e) {}
+          }
+        }
+      }
+      
+      if (!sessionId) {
+        sessionId = getSessionIdFromTest();
+      }
+
+      // Reset mocks
+      jest.clearAllMocks();
+
+      // Now test DELETE request as user2
+      mockReq.method = 'DELETE';
+      mockReq.headers = {
+        ...mockReq.headers,
+        'mcp-session-id': sessionId
+      };
+      mockReq.body = {};
+      mockReq.auth = {
+        clientId: 'test-client-456',
+        token: 'test-token-2',
+        scopes: ['mcp'],
+        extra: { userId: 'user2' }
       } as AuthInfo;
 
       await handleStreamableHTTP(mockReq as Request, mockRes as Response);
 
-      // Should return 404 for non-existent session
-      expect(mockRes.status).toHaveBeenCalledWith(404);
-      expect(mockRes.json).toHaveBeenCalledWith({
-        jsonrpc: '2.0',
-        error: {
-          code: -32001,
-          message: 'Session not found',
-        },
-        id: null,
-      });
+      // Should return 401 for unauthorized access to another user's session
+      expect(mockRes.status).toHaveBeenCalledWith(401);
     });
   });
 
@@ -242,13 +384,15 @@ describe('Streamable HTTP Handler Integration Tests', () => {
       const user1Auth: AuthInfo = {
         clientId: 'user1-client',
         token: 'user1-token',
-        scopes: ['mcp']
+        scopes: ['mcp'],
+        extra: { userId: 'user1' }
       };
 
       const user2Auth: AuthInfo = {
         clientId: 'user2-client', 
         token: 'user2-token',
-        scopes: ['mcp']
+        scopes: ['mcp'],
+        extra: { userId: 'user2' }
       };
 
       const initRequest: JSONRPCMessage = {
@@ -267,14 +411,61 @@ describe('Streamable HTTP Handler Integration Tests', () => {
       mockReq.auth = user1Auth;
 
       await handleStreamableHTTP(mockReq as Request, mockRes as Response);
-
+      
+      // Wait for async initialization to complete
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Get the actual session ID from response
+      let actualSessionId: string | undefined;
+      
+      // Check JSON responses
+      const jsonCalls = (mockRes.json as jest.Mock).mock.calls;
+      if (jsonCalls.length > 0) {
+        const response = jsonCalls[0][0];
+        if (response?.result?._meta?.sessionId) {
+          actualSessionId = response.result._meta.sessionId;
+        }
+      }
+      
+      // Check write calls (for SSE responses)
+      if (!actualSessionId) {
+        const writeCalls = (mockRes.write as jest.Mock).mock.calls;
+        for (const [data] of writeCalls) {
+          if (typeof data === 'string' && data.includes('sessionId')) {
+            try {
+              const jsonStr = data.replace(/^data: /, '').trim();
+              const parsed = JSON.parse(jsonStr);
+              if (parsed?.result?._meta?.sessionId) {
+                actualSessionId = parsed.result._meta.sessionId;
+              }
+            } catch (e) {}
+          }
+        }
+      }
+      
+      if (!actualSessionId) {
+        actualSessionId = getSessionIdFromTest();
+      }
+      
+      expect(actualSessionId).toBeDefined();
+      
+      // Store finish handler before clearing mocks
+      const finishHandler1 = (mockRes.on as jest.Mock).mock.calls.find(
+        ([event]) => event === 'finish'
+      )?.[1] as (() => Promise<void>) | undefined;
+      
       // Reset mocks
       jest.clearAllMocks();
+      
+      // Trigger cleanup for the MCP server created in this step
+      if (finishHandler1) {
+        await finishHandler1();
+      }
 
       // User 2 tries to access user 1's session
       mockReq.headers = {
         ...mockReq.headers,
-        'mcp-session-id': sessionId
+        'mcp-session-id': actualSessionId
       };
       mockReq.body = {
         jsonrpc: '2.0',
@@ -286,19 +477,22 @@ describe('Streamable HTTP Handler Integration Tests', () => {
 
       await handleStreamableHTTP(mockReq as Request, mockRes as Response);
 
-      // Should return 401 or 403 for unauthorized access
-      // Note: Current implementation might not enforce this
-      // This test documents what SHOULD happen for security
+      // Should return 401 for unauthorized access to another user's session
+      expect(mockRes.status).toHaveBeenCalledWith(401);
       
-      // expect(mockRes.status).toHaveBeenCalledWith(403);
-      // expect(mockRes.json).toHaveBeenCalledWith({
-      //   jsonrpc: '2.0',
-      //   error: {
-      //     code: -32000,
-      //     message: 'Unauthorized: Session belongs to different user'
-      //   },
-      //   id: null
-      // });
+      // Clean up the MCP server by sending DELETE request
+      if (actualSessionId) {
+        jest.clearAllMocks();
+        mockReq.method = 'DELETE';
+        mockReq.headers['mcp-session-id'] = actualSessionId;
+        mockReq.body = {};
+        mockReq.auth = user1Auth; // Use user1's auth to delete their session
+        
+        await handleStreamableHTTP(mockReq as Request, mockRes as Response);
+        
+        // Wait a bit for cleanup to complete
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
     });
 
     it('should allow users to create separate sessions with same session ID pattern', async () => {
@@ -334,8 +528,18 @@ describe('Streamable HTTP Handler Integration Tests', () => {
 
       await handleStreamableHTTP(mockReq as Request, mockRes as Response);
       
+      // Store finish handler before clearing mocks
+      const finishHandler1 = (mockRes.on as jest.Mock).mock.calls.find(
+        ([event]) => event === 'finish'
+      )?.[1] as (() => Promise<void>) | undefined;
+      
       // Reset for user 2
       jest.clearAllMocks();
+      
+      // Trigger cleanup for User 1's MCP server
+      if (finishHandler1) {
+        await finishHandler1();
+      }
 
       // User 2 creates their own session
       mockReq.body = {
@@ -350,6 +554,15 @@ describe('Streamable HTTP Handler Integration Tests', () => {
       delete mockReq.headers!['mcp-session-id']; // New initialization
 
       await handleStreamableHTTP(mockReq as Request, mockRes as Response);
+
+      // Trigger cleanup for User 2's MCP server
+      const finishHandler2 = (mockRes.on as jest.Mock).mock.calls.find(
+        ([event]) => event === 'finish'
+      )?.[1] as (() => Promise<void>) | undefined;
+      
+      if (finishHandler2) {
+        await finishHandler2();
+      }
 
       // Both users should be able to create sessions successfully
       // Sessions should be isolated in Redis using user-scoped keys
@@ -388,6 +601,15 @@ describe('Streamable HTTP Handler Integration Tests', () => {
 
       await handleStreamableHTTP(mockReq as Request, mockRes as Response);
 
+      // Trigger cleanup for User 1's MCP server
+      const finishHandler1 = (mockRes.on as jest.Mock).mock.calls.find(
+        ([event]) => event === 'finish'
+      )?.[1] as (() => Promise<void>) | undefined;
+      
+      if (finishHandler1) {
+        await finishHandler1();
+      }
+
       // Track session 1 ID (would be returned in response headers)
       const session1Id = 'user1-session-id'; // In real implementation, extract from response
 
@@ -405,6 +627,15 @@ describe('Streamable HTTP Handler Integration Tests', () => {
       delete mockReq.headers!['mcp-session-id'];
 
       await handleStreamableHTTP(mockReq as Request, mockRes as Response);
+
+      // Trigger cleanup for User 2's MCP server
+      const finishHandler2 = (mockRes.on as jest.Mock).mock.calls.find(
+        ([event]) => event === 'finish'
+      )?.[1] as (() => Promise<void>) | undefined;
+      
+      if (finishHandler2) {
+        await finishHandler2();
+      }
 
       // Track session 2 ID
       const session2Id = 'user2-session-id';

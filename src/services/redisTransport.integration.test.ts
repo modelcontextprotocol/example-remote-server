@@ -2,9 +2,10 @@ import { jest } from '@jest/globals';
 import { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js';
 import { MockRedisClient, setRedisClient } from '../redis.js';
 import { 
-  startServerListeningToRedis,
+  ServerRedisTransport,
   redisRelayToMcpServer,
-  shutdownSession
+  shutdownSession,
+  setSessionOwner
 } from './redisTransport.js';
 import { createMcpServer } from './mcp.js';
 import { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
@@ -27,8 +28,10 @@ describe('Redis Transport Integration', () => {
 
     it('should relay initialization request from client to server through Redis', async () => {
       // 1. Start the server listening to Redis
-      const serverWrapper = createMcpServer();
-      const serverTransport = await startServerListeningToRedis(serverWrapper, sessionId);
+      const { server, cleanup: serverCleanup } = createMcpServer();
+      const serverTransport = new ServerRedisTransport(sessionId);
+      serverTransport.onclose = serverCleanup;
+      await server.connect(serverTransport);
 
       // 2. Create a mock client transport (simulating the streamable HTTP client side)
       const mockClientTransport: Transport = {
@@ -121,13 +124,20 @@ describe('Redis Transport Integration', () => {
       // Cleanup
       await cleanup();
       await shutdownSession(sessionId);
+      serverCleanup(); // Clean up MCP server intervals
+      
+      // Ensure server transport is closed
+      await serverTransport.close();
+      
       await new Promise(resolve => setTimeout(resolve, 10));
     });
 
     it('should handle tools/list request through Redis relay', async () => {
       // Set up server and mock client
-      const serverWrapper = createMcpServer();
-      const serverTransport = await startServerListeningToRedis(serverWrapper, sessionId);
+      const { server, cleanup: serverCleanup } = createMcpServer();
+      const serverTransport = new ServerRedisTransport(sessionId);
+      serverTransport.onclose = serverCleanup;
+      await server.connect(serverTransport);
       
       const mockClientTransport: Transport = {
         onmessage: undefined,
@@ -168,13 +178,20 @@ describe('Redis Transport Integration', () => {
       // Cleanup
       await cleanup();
       await shutdownSession(sessionId);
+      serverCleanup(); // Clean up MCP server intervals
+      
+      // Ensure server transport is closed
+      await serverTransport.close();
+      
       await new Promise(resolve => setTimeout(resolve, 10));
     });
 
     it('should handle notifications through Redis relay', async () => {
       // Set up server and mock client
-      const serverWrapper = createMcpServer();
-      const serverTransport = await startServerListeningToRedis(serverWrapper, sessionId);
+      const { server, cleanup: serverCleanup } = createMcpServer();
+      const serverTransport = new ServerRedisTransport(sessionId);
+      serverTransport.onclose = serverCleanup;
+      await server.connect(serverTransport);
       
       const mockClientTransport: Transport = {
         onmessage: undefined,
@@ -186,6 +203,17 @@ describe('Redis Transport Integration', () => {
       };
 
       const cleanup = redisRelayToMcpServer(sessionId, mockClientTransport);
+
+      // Set up notification subscription manually since notifications don't have an id
+      const notificationChannel = `mcp:shttp:toclient:${sessionId}:__GET_stream`;
+      const notificationCleanup = await mockRedis.createSubscription(notificationChannel, async (redisMessageJson) => {
+        const redisMessage = JSON.parse(redisMessageJson);
+        if (redisMessage.type === 'mcp') {
+          await mockClientTransport.send(redisMessage.message, redisMessage.options);
+        }
+      }, (error) => {
+        mockClientTransport.onerror?.(error);
+      });
 
       // Send a notification from server (notifications don't have an id)
       const notification: JSONRPCMessage = {
@@ -216,9 +244,17 @@ describe('Redis Transport Integration', () => {
         undefined
       );
 
+      // Cleanup notification subscription
+      await notificationCleanup();
+
       // Cleanup
       await cleanup();
       await shutdownSession(sessionId);
+      serverCleanup(); // Clean up MCP server intervals
+      
+      // Ensure server transport is closed
+      await serverTransport.close();
+      
       await new Promise(resolve => setTimeout(resolve, 10));
     });
 
