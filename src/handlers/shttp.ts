@@ -42,6 +42,8 @@ export async function handleStreamableHTTP(req: Request, res: Response) {
       return;
     }
 
+    const isGetRequest = req.method === 'GET';
+
     // incorrect session for the authed user, return 401
     if (sessionId) {
       if (!(await isSessionOwnedBy(sessionId, userId))) {
@@ -49,7 +51,7 @@ export async function handleStreamableHTTP(req: Request, res: Response) {
         return;
       }
       // Reuse existing transport for owned session
-      shttpTransport = await getShttpTransport(sessionId, onsessionclosed);
+      shttpTransport = await getShttpTransport(sessionId, onsessionclosed, isGetRequest);
     } else if (isInitializeRequest(req.body)) {
       // New initialization request - use JSON response mode
       const onsessioninitialized = async (sessionId: string) => {
@@ -69,7 +71,7 @@ export async function handleStreamableHTTP(req: Request, res: Response) {
         onsessionclosed,
         onsessioninitialized,
       });
-      shttpTransport.onclose = redisRelayToMcpServer(sessionId, shttpTransport);
+      shttpTransport.onclose = await redisRelayToMcpServer(sessionId, shttpTransport);
     } else {
       // Invalid request - no session ID and not initialization request
       res.status(400)

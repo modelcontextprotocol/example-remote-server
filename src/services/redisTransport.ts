@@ -81,7 +81,7 @@ export async function isSessionOwnedBy(sessionId: string, userId: string): Promi
 }
 
 
-export function redisRelayToMcpServer(sessionId: string, transport: Transport): () => Promise<void> {
+export async function redisRelayToMcpServer(sessionId: string, transport: Transport, isGetRequest: boolean = false): Promise<() => Promise<void>> {
   let redisCleanup: (() => Promise<void>) | undefined = undefined;
   const cleanup = async () => {
     // TODO: solve race conditions where we call cleanup while the subscription is being created / before it is created
@@ -90,33 +90,39 @@ export function redisRelayToMcpServer(sessionId: string, transport: Transport): 
     }
   }
 
-  const messagePromise = new Promise<JSONRPCMessage>((resolve) => {
-    transport.onmessage = async (message, extra) => {
-      // First, set up response subscription if needed
-      if ("id" in message) {
-        const toClientChannel = getToClientChannel(sessionId, message.id.toString());
+  const subscribe = async (requestId: string) => {
+    const toClientChannel = getToClientChannel(sessionId, requestId);
 
-        redisCleanup = await redisClient.createSubscription(toClientChannel, async (redisMessageJson) => {
-          const redisMessage = JSON.parse(redisMessageJson) as RedisMessage;
-          if (redisMessage.type === 'mcp') {
-            await transport.send(redisMessage.message, redisMessage.options);
-          }
-        }, (error) => {
-          transport.onerror?.(error);
-        });
+    redisCleanup = await redisClient.createSubscription(toClientChannel, async (redisMessageJson) => {
+      const redisMessage = JSON.parse(redisMessageJson) as RedisMessage;
+      if (redisMessage.type === 'mcp') {
+        await transport.send(redisMessage.message, redisMessage.options);
       }
-      
-      // Now send the message to the MCP server
-      await sendToMcpServer(sessionId, message, extra);
-      resolve(message);
-    }
-  });
+    }, (error) => {
+      transport.onerror?.(error);
+    });
+  }
 
-  messagePromise.catch((error) => {
-    transport.onerror?.(error);
-    cleanup();
-  });
-
+  if (isGetRequest) {
+    await subscribe(notificationStreamId);
+  } else {
+    const messagePromise = new Promise<JSONRPCMessage>((resolve) => {
+      transport.onmessage = async (message, extra) => {
+        // First, set up response subscription if needed
+        if ("id" in message) {
+          await subscribe(message.id.toString());
+        }
+        // Now send the message to the MCP server
+        await sendToMcpServer(sessionId, message, extra);
+        resolve(message);
+      }
+    });
+  
+    messagePromise.catch((error) => {
+      transport.onerror?.(error);
+      cleanup();
+    });   
+  }
   return cleanup;
 }
 
@@ -202,7 +208,7 @@ export class ServerRedisTransport implements Transport {
   }
 }
 
-export async function getShttpTransport(sessionId: string, onsessionclosed: (sessionId: string) => void | Promise<void>): Promise<StreamableHTTPServerTransport> {
+export async function getShttpTransport(sessionId: string, onsessionclosed: (sessionId: string) => void | Promise<void>, isGetRequest: boolean = false): Promise<StreamableHTTPServerTransport> {
   // Giving undefined here and setting the sessionId means the 
   // transport wont try to create a new session.
   const shttpTransport = new StreamableHTTPServerTransport({
@@ -212,7 +218,7 @@ export async function getShttpTransport(sessionId: string, onsessionclosed: (ses
   shttpTransport.sessionId = sessionId;
 
   // Use the new request-id based relay approach
-  const cleanup = redisRelayToMcpServer(sessionId, shttpTransport);
+  const cleanup = await redisRelayToMcpServer(sessionId, shttpTransport, isGetRequest);
   shttpTransport.onclose = cleanup; 
   return shttpTransport;
 }
