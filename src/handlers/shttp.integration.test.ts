@@ -5,6 +5,7 @@ import { MockRedisClient, setRedisClient } from '../redis.js';
 import { handleStreamableHTTP } from './shttp.js';
 import { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 import { randomUUID } from 'crypto';
+import { shutdownSession } from '../services/redisTransport.js';
 
 describe('Streamable HTTP Handler Integration Tests', () => {
   let mockRedis: MockRedisClient;
@@ -21,6 +22,8 @@ describe('Streamable HTTP Handler Integration Tests', () => {
       status: jest.fn().mockReturnThis(),
       json: jest.fn().mockReturnThis(),
       on: jest.fn().mockReturnThis(),
+      once: jest.fn().mockReturnThis(),
+      emit: jest.fn().mockReturnThis(),
       headersSent: false,
       setHeader: jest.fn().mockReturnThis(),
       writeHead: jest.fn().mockReturnThis(),
@@ -28,13 +31,17 @@ describe('Streamable HTTP Handler Integration Tests', () => {
       end: jest.fn().mockReturnThis(),
       getHeader: jest.fn(),
       removeHeader: jest.fn().mockReturnThis(),
-    } as Partial<Response>;
+      socket: {
+        setTimeout: jest.fn(),
+      },
+    } as unknown as Partial<Response>;
 
     // Create mock request
     mockReq = {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
+        'accept': 'application/json, text/event-stream',
         'mcp-protocol-version': '2024-11-05',
       },
       body: {},
@@ -57,12 +64,12 @@ describe('Streamable HTTP Handler Integration Tests', () => {
   };
 
   // Helper to extract session ID from test context
-  const getSessionIdFromTest = () => {
+  const getSessionIdFromTest = (): string | undefined => {
     // Try to get from response headers first
     const setHeaderCalls = (mockRes.setHeader as jest.Mock).mock.calls;
     const sessionIdHeader = setHeaderCalls.find(([name]) => name === 'mcp-session-id');
     if (sessionIdHeader?.[1]) {
-      return sessionIdHeader[1];
+      return sessionIdHeader[1] as string;
     }
     
     // Fall back to extracting from Redis channels
@@ -105,6 +112,10 @@ describe('Streamable HTTP Handler Integration Tests', () => {
 
       // Wait longer for async initialization to complete
       await new Promise(resolve => setTimeout(resolve, 200));
+
+      // get the sessionId from the response
+      const sessionId = getSessionIdFromTest();
+      expect(sessionId).toBeDefined();
       
       // Check if any subscriptions were created on any channels
       // Since we don't know the exact sessionId generated, check all channels
@@ -129,6 +140,10 @@ describe('Streamable HTTP Handler Integration Tests', () => {
 
       // Verify cleanup handler was registered
       expect(mockRes.on).toHaveBeenCalledWith('finish', expect.any(Function));
+
+      if (sessionId) {
+        await shutdownSession(sessionId)
+      }
     });
 
     it('should handle cleanup errors gracefully', async () => {
@@ -175,7 +190,9 @@ describe('Streamable HTTP Handler Integration Tests', () => {
         // Send DELETE request to clean up MCP server
         jest.clearAllMocks();
         mockReq.method = 'DELETE';
-        mockReq.headers['mcp-session-id'] = cleanupSessionId;
+        if (mockReq.headers) {
+          mockReq.headers['mcp-session-id'] = cleanupSessionId;
+        }
         mockReq.body = {};
         
         await handleStreamableHTTP(mockReq as Request, mockRes as Response);
@@ -223,7 +240,7 @@ describe('Streamable HTTP Handler Integration Tests', () => {
       let sessionId: string | undefined;
       
       if (jsonCalls.length > 0) {
-        const response = jsonCalls[0][0];
+        const response = jsonCalls[0][0] as any;
         if (response?.result?._meta?.sessionId) {
           sessionId = response.result._meta.sessionId;
         }
@@ -237,7 +254,7 @@ describe('Streamable HTTP Handler Integration Tests', () => {
             try {
               // SSE data format: "data: {...}\n\n"
               const jsonStr = data.replace(/^data: /, '').trim();
-              const parsed = JSON.parse(jsonStr);
+              const parsed = JSON.parse(jsonStr) as any;
               if (parsed?.result?._meta?.sessionId) {
                 sessionId = parsed.result._meta.sessionId;
               }
@@ -327,7 +344,7 @@ describe('Streamable HTTP Handler Integration Tests', () => {
       // Check JSON responses
       const jsonCalls = (mockRes.json as jest.Mock).mock.calls;
       if (jsonCalls.length > 0) {
-        const response = jsonCalls[0][0];
+        const response = jsonCalls[0][0] as any;
         if (response?.result?._meta?.sessionId) {
           sessionId = response.result._meta.sessionId;
         }
@@ -340,7 +357,7 @@ describe('Streamable HTTP Handler Integration Tests', () => {
           if (typeof data === 'string' && data.includes('sessionId')) {
             try {
               const jsonStr = data.replace(/^data: /, '').trim();
-              const parsed = JSON.parse(jsonStr);
+              const parsed = JSON.parse(jsonStr) as any;
               if (parsed?.result?._meta?.sessionId) {
                 sessionId = parsed.result._meta.sessionId;
               }
@@ -374,13 +391,17 @@ describe('Streamable HTTP Handler Integration Tests', () => {
 
       // Should return 401 for unauthorized access to another user's session
       expect(mockRes.status).toHaveBeenCalledWith(401);
+
+      // shutdown the session
+      if (sessionId) {
+        await shutdownSession(sessionId)
+      }
     });
   });
 
   describe('User Session Isolation', () => {
     it('should prevent users from accessing sessions created by other users', async () => {
       // Create session for user 1
-      const sessionId = randomUUID();
       const user1Auth: AuthInfo = {
         clientId: 'user1-client',
         token: 'user1-token',
@@ -421,7 +442,7 @@ describe('Streamable HTTP Handler Integration Tests', () => {
       // Check JSON responses
       const jsonCalls = (mockRes.json as jest.Mock).mock.calls;
       if (jsonCalls.length > 0) {
-        const response = jsonCalls[0][0];
+        const response = jsonCalls[0][0] as any;
         if (response?.result?._meta?.sessionId) {
           actualSessionId = response.result._meta.sessionId;
         }

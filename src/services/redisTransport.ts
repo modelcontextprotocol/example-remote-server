@@ -202,11 +202,12 @@ export class ServerRedisTransport implements Transport {
   }
 }
 
-export async function getShttpTransport(sessionId: string): Promise<StreamableHTTPServerTransport> {
+export async function getShttpTransport(sessionId: string, onsessionclosed: (sessionId: string) => void | Promise<void>): Promise<StreamableHTTPServerTransport> {
   // Giving undefined here and setting the sessionId means the 
   // transport wont try to create a new session.
   const shttpTransport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
+    onsessionclosed,
   })
   shttpTransport.sessionId = sessionId;
 

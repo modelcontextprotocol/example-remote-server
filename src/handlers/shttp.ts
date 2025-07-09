@@ -27,6 +27,10 @@ export async function handleStreamableHTTP(req: Request, res: Response) {
     await shttpTransport?.close();
   });
 
+  const onsessionclosed = async (sessionId: string) => {
+    await shutdownSession(sessionId);
+  }
+
   try {
     // Check for existing session ID
     const sessionId = req.headers['mcp-session-id'] as string | undefined;
@@ -45,7 +49,7 @@ export async function handleStreamableHTTP(req: Request, res: Response) {
         return;
       }
       // Reuse existing transport for owned session
-      shttpTransport = await getShttpTransport(sessionId);
+      shttpTransport = await getShttpTransport(sessionId, onsessionclosed);
     } else if (isInitializeRequest(req.body)) {
       // New initialization request - use JSON response mode
       const onsessioninitialized = async (sessionId: string) => {
@@ -59,16 +63,10 @@ export async function handleStreamableHTTP(req: Request, res: Response) {
         await setSessionOwner(sessionId, userId);
       }
 
-      const onsessionclosed = (sessionId: string) => {
-        console.log(`Session ${sessionId} closing`);
-        void shutdownSession(sessionId);
-        console.log(`Session ${sessionId} closed`);
-      }
-
       const sessionId = randomUUID();
       shttpTransport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => sessionId,
-        onsessionclosed, // dev build only
+        onsessionclosed,
         onsessioninitialized,
       });
       shttpTransport.onclose = redisRelayToMcpServer(sessionId, shttpTransport);

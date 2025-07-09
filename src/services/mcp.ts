@@ -674,7 +674,6 @@ export const createMcpServer = (): McpServerWrapper => {
   });
 
   const cleanup = async () => {
-    console.log("Cleaning up MCP server");
     if (subsUpdateInterval) clearInterval(subsUpdateInterval);
     if (logsUpdateInterval) clearInterval(logsUpdateInterval);
     if (stdErrUpdateInterval) clearInterval(stdErrUpdateInterval);
