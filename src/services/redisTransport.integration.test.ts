@@ -44,7 +44,7 @@ describe('Redis Transport Integration', () => {
       };
 
       // 3. Set up the Redis relay (this is what happens in the HTTP handler)
-      const cleanup = redisRelayToMcpServer(sessionId, mockClientTransport);
+      const cleanup = await redisRelayToMcpServer(sessionId, mockClientTransport);
 
       // Track messages received by server
       const serverReceivedMessages: JSONRPCMessage[] = [];
@@ -148,7 +148,7 @@ describe('Redis Transport Integration', () => {
         start: jest.fn(() => Promise.resolve())
       };
 
-      const cleanup = redisRelayToMcpServer(sessionId, mockClientTransport);
+      const cleanup = await redisRelayToMcpServer(sessionId, mockClientTransport);
 
       // Send tools/list request
       const toolsListMessage: JSONRPCMessage = {
@@ -202,7 +202,7 @@ describe('Redis Transport Integration', () => {
         start: jest.fn(() => Promise.resolve())
       };
 
-      const cleanup = redisRelayToMcpServer(sessionId, mockClientTransport);
+      const cleanup = await redisRelayToMcpServer(sessionId, mockClientTransport);
 
       // Set up notification subscription manually since notifications don't have an id
       const notificationChannel = `mcp:shttp:toclient:${sessionId}:__GET_stream`;
@@ -268,7 +268,7 @@ describe('Redis Transport Integration', () => {
         start: jest.fn(() => Promise.resolve())
       };
 
-      const cleanup = redisRelayToMcpServer(sessionId, mockClientTransport);
+      const cleanup = await redisRelayToMcpServer(sessionId, mockClientTransport);
 
       // Send a notification (no id field)
       const notification: JSONRPCMessage = {

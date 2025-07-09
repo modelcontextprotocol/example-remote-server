@@ -134,6 +134,8 @@ export class ServerRedisTransport implements Transport {
   private controlCleanup?: (() => Promise<void>);
   private serverCleanup?: (() => Promise<void>);
   private shouldShutdown = false;
+  private inactivityTimeout?: NodeJS.Timeout;
+  private readonly INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
   onclose?: (() => void) | undefined;
   onerror?: ((error: Error) => void) | undefined;
@@ -144,7 +146,29 @@ export class ServerRedisTransport implements Transport {
     this._sessionId = sessionId;
   }
 
+  private resetInactivityTimer(): void {
+    // Clear existing timeout if any
+    if (this.inactivityTimeout) {
+      clearTimeout(this.inactivityTimeout);
+    }
+
+    // Set new timeout
+    this.inactivityTimeout = setTimeout(() => {
+      console.log(`Session ${this._sessionId} timed out due to inactivity`);
+      void shutdownSession(this._sessionId);
+    }, this.INACTIVITY_TIMEOUT_MS);
+  }
+
+  private clearInactivityTimer(): void {
+    if (this.inactivityTimeout) {
+      clearTimeout(this.inactivityTimeout);
+      this.inactivityTimeout = undefined;
+    }
+  }
+
   async start(): Promise<void> {
+    // Start inactivity timer
+    this.resetInactivityTimer();
     
     // Subscribe to MCP messages from clients
     const serverChannel = getToServerChannel(this._sessionId);
@@ -153,6 +177,8 @@ export class ServerRedisTransport implements Transport {
       (messageJson) => {
         const redisMessage = JSON.parse(messageJson) as RedisMessage;
         if (redisMessage.type === 'mcp') {
+          // Reset inactivity timer on each message from client
+          this.resetInactivityTimer();
           this.onmessage?.(redisMessage.message, redisMessage.extra);
         }
       },
@@ -191,6 +217,8 @@ export class ServerRedisTransport implements Transport {
   }
 
   async close(): Promise<void> {
+    // Clear inactivity timer
+    this.clearInactivityTimer();
     
     // Clean up server message subscription
     if (this.serverCleanup) {

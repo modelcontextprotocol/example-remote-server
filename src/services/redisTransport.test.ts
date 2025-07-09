@@ -172,7 +172,7 @@ describe('Redis Transport', () => {
     });
 
     it('should set up message relay from transport to server', async () => {
-      const cleanup = redisRelayToMcpServer(sessionId, mockTransport);
+      const cleanup = await redisRelayToMcpServer(sessionId, mockTransport);
 
       // Simulate a message from the transport
       const requestMessage: JSONRPCMessage = {
@@ -203,7 +203,7 @@ describe('Redis Transport', () => {
     });
 
     it('should subscribe to response channel for request messages', async () => {
-      const cleanup = redisRelayToMcpServer(sessionId, mockTransport);
+      const cleanup = await redisRelayToMcpServer(sessionId, mockTransport);
 
       const requestMessage: JSONRPCMessage = {
         jsonrpc: '2.0',
@@ -241,7 +241,7 @@ describe('Redis Transport', () => {
     });
 
     it('should not subscribe for notification messages (no id)', async () => {
-      const cleanup = redisRelayToMcpServer(sessionId, mockTransport);
+      const cleanup = await redisRelayToMcpServer(sessionId, mockTransport);
 
       const notificationMessage: JSONRPCMessage = {
         jsonrpc: '2.0',
@@ -337,7 +337,7 @@ describe('Redis Transport', () => {
         start: jest.fn(() => Promise.resolve())
       };
 
-      const cleanup = redisRelayToMcpServer(sessionId, clientTransport);
+      const cleanup = await redisRelayToMcpServer(sessionId, clientTransport);
 
       // Client sends a request
       const listToolsRequest: JSONRPCMessage = {
@@ -432,6 +432,106 @@ describe('Redis Transport', () => {
       await new Promise(resolve => setTimeout(resolve, 10));
 
       expect(onCloseMock).toHaveBeenCalled();
+    });
+  });
+
+  describe('Inactivity Timeout', () => {
+    const sessionId = 'test-inactivity-session';
+
+    beforeEach(() => {
+      jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick'] });
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('should shutdown session after 5 minutes of inactivity', async () => {
+      const transport = new ServerRedisTransport(sessionId);
+      const shutdownSpy = jest.spyOn(mockRedis, 'publish');
+      
+      await transport.start();
+
+      // Fast-forward time by 5 minutes
+      jest.advanceTimersByTime(5 * 60 * 1000);
+
+      // Should have published shutdown control message
+      expect(shutdownSpy).toHaveBeenCalledWith(
+        `mcp:control:${sessionId}`,
+        expect.stringContaining('"action":"SHUTDOWN"')
+      );
+
+      await transport.close();
+    });
+
+    it('should reset timeout when message is received', async () => {
+      const transport = new ServerRedisTransport(sessionId);
+      const onMessageMock = jest.fn();
+      transport.onmessage = onMessageMock;
+      
+      await transport.start();
+
+      // Fast-forward 4 minutes
+      jest.advanceTimersByTime(4 * 60 * 1000);
+
+      // Manually publish a message to trigger the subscription handler
+      const testMessage = { jsonrpc: '2.0', method: 'ping' };
+      await mockRedis.publish(
+        `mcp:shttp:toserver:${sessionId}`,
+        JSON.stringify({
+          type: 'mcp',
+          message: testMessage
+        })
+      );
+
+      // Wait for message to be processed
+      await new Promise(resolve => setImmediate(resolve));
+
+      // Verify message was received
+      expect(onMessageMock).toHaveBeenCalledWith(testMessage, undefined);
+
+      // Clear the publish spy to check only future calls
+      const shutdownSpy = jest.spyOn(mockRedis, 'publish');
+      shutdownSpy.mockClear();
+
+      // Fast-forward 4 more minutes (total 8, but only 4 since last message)
+      jest.advanceTimersByTime(4 * 60 * 1000);
+
+      // Should not have shutdown yet
+      expect(shutdownSpy).not.toHaveBeenCalledWith(
+        `mcp:control:${sessionId}`,
+        expect.stringContaining('"action":"SHUTDOWN"')
+      );
+
+      // Fast-forward 2 more minutes to exceed timeout
+      jest.advanceTimersByTime(2 * 60 * 1000);
+
+      // Now should have shutdown
+      expect(shutdownSpy).toHaveBeenCalledWith(
+        `mcp:control:${sessionId}`,
+        expect.stringContaining('"action":"SHUTDOWN"')
+      );
+
+      await transport.close();
+    }, 10000);
+
+    it('should clear timeout on close', async () => {
+      const transport = new ServerRedisTransport(sessionId);
+      const shutdownSpy = jest.spyOn(mockRedis, 'publish');
+      
+      await transport.start();
+
+      // Close transport before timeout
+      await transport.close();
+
+      // Fast-forward past timeout
+      jest.advanceTimersByTime(10 * 60 * 1000);
+
+      // Should not have triggered shutdown
+      expect(shutdownSpy).not.toHaveBeenCalledWith(
+        `mcp:control:${sessionId}`,
+        expect.stringContaining('"action":"SHUTDOWN"')
+      );
     });
   });
 });
