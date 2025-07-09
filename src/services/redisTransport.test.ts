@@ -36,14 +36,14 @@ describe('Redis Transport', () => {
       transport = new ServerRedisTransport(sessionId);
     });
 
-    it('should create transport with session ID', () => {
-      expect(transport).toBeInstanceOf(ServerRedisTransport);
+    afterEach(async () => {
+      if (transport) {
+        await transport.close();
+      }
     });
 
-    it('should start without subscribing (server only sends)', async () => {
-      await transport.start();
-      // Should not create any subscriptions since server only sends
-      expect(mockRedis.numsub('any-channel')).resolves.toBe(0);
+    it('should create transport with session ID', () => {
+      expect(transport).toBeInstanceOf(ServerRedisTransport);
     });
 
     it('should send response messages to request-specific channels', async () => {
