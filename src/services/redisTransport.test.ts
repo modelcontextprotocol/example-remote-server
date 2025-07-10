@@ -12,7 +12,6 @@ import {
   isSessionOwnedBy
 } from './redisTransport.js';
 import { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
-import { createMcpServer } from './mcp.js';
 
 describe('Redis Transport', () => {
   let mockRedis: MockRedisClient;

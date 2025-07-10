@@ -1,10 +1,10 @@
 import { jest } from '@jest/globals';
 import { Request, Response } from 'express';
-import { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js';
+import { JSONRPCMessage, JSONRPCResponse } from '@modelcontextprotocol/sdk/types.js';
 import { MockRedisClient, setRedisClient } from '../redis.js';
 import { handleStreamableHTTP } from './shttp.js';
 import { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
-import { randomUUID } from 'crypto';
+// import { randomUUID } from 'crypto'; // Currently unused but may be needed for future tests
 import { shutdownSession } from '../services/redisTransport.js';
 
 describe('Streamable HTTP Handler Integration Tests', () => {
@@ -147,7 +147,6 @@ describe('Streamable HTTP Handler Integration Tests', () => {
     });
 
     it('should handle cleanup errors gracefully', async () => {
-      const sessionId = randomUUID();
       const initRequest: JSONRPCMessage = {
         jsonrpc: '2.0',
         id: 'init-1',
@@ -176,7 +175,6 @@ describe('Streamable HTTP Handler Integration Tests', () => {
       )?.[1] as (() => Promise<void>) | undefined;
 
       // Simulate error during cleanup
-      const originalSimulateError = mockRedis.simulateError.bind(mockRedis);
       
       // Cleanup should not throw error even if Redis operations fail
       if (finishHandler) {
@@ -240,7 +238,7 @@ describe('Streamable HTTP Handler Integration Tests', () => {
       let sessionId: string | undefined;
       
       if (jsonCalls.length > 0) {
-        const response = jsonCalls[0][0] as any;
+        const response = jsonCalls[0][0] as JSONRPCResponse;
         if (response?.result?._meta?.sessionId) {
           sessionId = response.result._meta.sessionId;
         }
@@ -254,11 +252,11 @@ describe('Streamable HTTP Handler Integration Tests', () => {
             try {
               // SSE data format: "data: {...}\n\n"
               const jsonStr = data.replace(/^data: /, '').trim();
-              const parsed = JSON.parse(jsonStr) as any;
+              const parsed = JSON.parse(jsonStr) as JSONRPCResponse;
               if (parsed?.result?._meta?.sessionId) {
                 sessionId = parsed.result._meta.sessionId;
               }
-            } catch (e) {
+            } catch {
               // Not valid JSON, continue
             }
           }
@@ -344,7 +342,7 @@ describe('Streamable HTTP Handler Integration Tests', () => {
       // Check JSON responses
       const jsonCalls = (mockRes.json as jest.Mock).mock.calls;
       if (jsonCalls.length > 0) {
-        const response = jsonCalls[0][0] as any;
+        const response = jsonCalls[0][0] as JSONRPCResponse;
         if (response?.result?._meta?.sessionId) {
           sessionId = response.result._meta.sessionId;
         }
@@ -357,11 +355,13 @@ describe('Streamable HTTP Handler Integration Tests', () => {
           if (typeof data === 'string' && data.includes('sessionId')) {
             try {
               const jsonStr = data.replace(/^data: /, '').trim();
-              const parsed = JSON.parse(jsonStr) as any;
+              const parsed = JSON.parse(jsonStr) as JSONRPCResponse;
               if (parsed?.result?._meta?.sessionId) {
                 sessionId = parsed.result._meta.sessionId;
               }
-            } catch (e) {}
+            } catch {
+              // Ignore JSON parse errors
+            }
           }
         }
       }
@@ -442,7 +442,7 @@ describe('Streamable HTTP Handler Integration Tests', () => {
       // Check JSON responses
       const jsonCalls = (mockRes.json as jest.Mock).mock.calls;
       if (jsonCalls.length > 0) {
-        const response = jsonCalls[0][0] as any;
+        const response = jsonCalls[0][0] as JSONRPCResponse;
         if (response?.result?._meta?.sessionId) {
           actualSessionId = response.result._meta.sessionId;
         }
@@ -459,7 +459,9 @@ describe('Streamable HTTP Handler Integration Tests', () => {
               if (parsed?.result?._meta?.sessionId) {
                 actualSessionId = parsed.result._meta.sessionId;
               }
-            } catch (e) {}
+            } catch {
+              // Ignore JSON parse errors
+            }
           }
         }
       }
@@ -658,8 +660,7 @@ describe('Streamable HTTP Handler Integration Tests', () => {
         await finishHandler2();
       }
 
-      // Track session 2 ID
-      const session2Id = 'user2-session-id';
+      // Track session 2 ID (placeholder for actual implementation)
 
       // User 1 deletes their session
       jest.clearAllMocks();

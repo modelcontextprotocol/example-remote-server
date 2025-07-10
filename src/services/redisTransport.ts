@@ -28,8 +28,8 @@ function sendToMcpServer(sessionId: string, message: JSONRPCMessage, extra?: { a
   logger.debug('Sending message to MCP server via Redis', {
     sessionId,
     channel: toServerChannel,
-    method: (message as any).method,
-    id: (message as any).id
+    method: ('method' in message ? message.method : undefined),
+    id: ('id' in message ? message.id : undefined)
   });
   
   const redisMessage: RedisMessage = { type: 'mcp', message, extra, options };
@@ -125,7 +125,7 @@ export async function redisRelayToMcpServer(sessionId: string, transport: Transp
         logger.debug('Relaying message from Redis to client', {
           sessionId,
           requestId,
-          method: (redisMessage.message as any).method
+          method: ('method' in redisMessage.message ? redisMessage.message.method : undefined)
         });
         await transport.send(redisMessage.message, redisMessage.options);
       }
@@ -148,7 +148,7 @@ export async function redisRelayToMcpServer(sessionId: string, transport: Transp
           logger.debug('Setting up response subscription', {
             sessionId,
             messageId: message.id,
-            method: (message as any).method
+            method: ('method' in message ? message.method : undefined)
           });
           await subscribe(message.id.toString());
         }
@@ -235,8 +235,8 @@ export class ServerRedisTransport implements Transport {
           
           logger.debug('Received MCP message from client', {
             sessionId: this._sessionId,
-            method: (redisMessage.message as any).method,
-            id: (redisMessage.message as any).id
+            method: ('method' in redisMessage.message ? redisMessage.message.method : undefined),
+            id: ('id' in redisMessage.message ? redisMessage.message.id : undefined)
           });
           
           this.onmessage?.(redisMessage.message, redisMessage.extra);
@@ -295,8 +295,8 @@ export class ServerRedisTransport implements Transport {
     logger.debug('Sending message to client', {
       sessionId: this._sessionId,
       channel,
-      method: (message as any).method,
-      id: (message as any).id,
+      method: ('method' in message ? message.method : undefined),
+      id: ('id' in message ? message.id : undefined),
       relatedRequestId
     });
 

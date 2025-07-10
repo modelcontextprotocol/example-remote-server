@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from 'async_hooks';
-import { Request } from 'express';
+import { Request, Response, NextFunction } from 'express';
 
 // Severity levels as per Google Cloud Logging
 export enum LogSeverity {
@@ -17,7 +17,11 @@ export enum LogSeverity {
 interface LogContext {
   trace?: string;
   spanId?: string;
-  [key: string]: any;
+  requestId?: string;
+  userAgent?: string;
+  method?: string;
+  path?: string;
+  [key: string]: string | undefined;
 }
 
 interface StructuredLogEntry {
@@ -26,7 +30,7 @@ interface StructuredLogEntry {
   timestamp: string;
   'logging.googleapis.com/trace'?: string;
   'logging.googleapis.com/spanId'?: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 class StructuredLogger {
@@ -73,7 +77,7 @@ class StructuredLogger {
    * Create Express middleware for request context
    */
   middleware() {
-    return (req: Request, res: any, next: any) => {
+    return (req: Request, res: Response, next: NextFunction) => {
       const context = this.extractTraceContext(req);
       this.runWithContext(context, () => {
         next();
@@ -84,7 +88,7 @@ class StructuredLogger {
   /**
    * Log a structured message
    */
-  private log(severity: LogSeverity, message: string, metadata?: Record<string, any>) {
+  private log(severity: LogSeverity, message: string, metadata?: Record<string, unknown>) {
     const context = this.asyncLocalStorage.getStore() || {};
     
     const entry: StructuredLogEntry = {
@@ -114,23 +118,23 @@ class StructuredLogger {
   }
 
   // Convenience methods for different severity levels
-  debug(message: string, metadata?: Record<string, any>) {
+  debug(message: string, metadata?: Record<string, unknown>) {
     this.log(LogSeverity.DEBUG, message, metadata);
   }
 
-  info(message: string, metadata?: Record<string, any>) {
+  info(message: string, metadata?: Record<string, unknown>) {
     this.log(LogSeverity.INFO, message, metadata);
   }
 
-  notice(message: string, metadata?: Record<string, any>) {
+  notice(message: string, metadata?: Record<string, unknown>) {
     this.log(LogSeverity.NOTICE, message, metadata);
   }
 
-  warning(message: string, metadata?: Record<string, any>) {
+  warning(message: string, metadata?: Record<string, unknown>) {
     this.log(LogSeverity.WARNING, message, metadata);
   }
 
-  error(message: string, error?: Error, metadata?: Record<string, any>) {
+  error(message: string, error?: Error, metadata?: Record<string, unknown>) {
     const errorMetadata = {
       ...metadata,
       error: error ? {
@@ -142,15 +146,15 @@ class StructuredLogger {
     this.log(LogSeverity.ERROR, message, errorMetadata);
   }
 
-  critical(message: string, metadata?: Record<string, any>) {
+  critical(message: string, metadata?: Record<string, unknown>) {
     this.log(LogSeverity.CRITICAL, message, metadata);
   }
 
-  alert(message: string, metadata?: Record<string, any>) {
+  alert(message: string, metadata?: Record<string, unknown>) {
     this.log(LogSeverity.ALERT, message, metadata);
   }
 
-  emergency(message: string, metadata?: Record<string, any>) {
+  emergency(message: string, metadata?: Record<string, unknown>) {
     this.log(LogSeverity.EMERGENCY, message, metadata);
   }
 

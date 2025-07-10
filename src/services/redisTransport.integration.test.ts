@@ -4,8 +4,7 @@ import { MockRedisClient, setRedisClient } from '../redis.js';
 import { 
   ServerRedisTransport,
   redisRelayToMcpServer,
-  shutdownSession,
-  setSessionOwner
+  shutdownSession
 } from './redisTransport.js';
 import { createMcpServer } from './mcp.js';
 import { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
