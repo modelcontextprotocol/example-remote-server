@@ -5,6 +5,7 @@ import { getShttpTransport, isSessionOwnedBy, redisRelayToMcpServer, ServerRedis
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { randomUUID } from "crypto";
 import { createMcpServer } from "../services/mcp.js";
+import { logger } from "../utils/logger.js";
 
 
 declare module "express-serve-static-core" {
@@ -80,7 +81,11 @@ export async function handleStreamableHTTP(req: Request, res: Response) {
     // Handle the request with existing transport - no need to reconnect
     await shttpTransport.handleRequest(req, res, req.body);
   } catch (error) {
-    console.error('Error handling MCP request:', error);
+    logger.error('Error handling MCP request', error as Error, {
+      sessionId: req.headers['mcp-session-id'] as string | undefined,
+      method: req.method,
+      userId: getUserIdFromAuth(req.auth)
+    });
     
     if (!res.headersSent) {
       res.status(500)

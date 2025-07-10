@@ -1,4 +1,5 @@
 import { createClient, SetOptions } from "@redis/client";
+import { logger } from "./utils/logger.js";
 
 /**
  * Describes the Redis primitives we use in this application, to be able to mock
@@ -46,7 +47,7 @@ export class RedisClientImpl implements RedisClient {
 
   constructor() {
     this.redis.on("error", (error) =>
-      console.error("Redis client error:", error),
+      logger.error("Redis client error", error as Error),
     );
   }
 

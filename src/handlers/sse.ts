@@ -6,6 +6,7 @@ import getRawBody from "raw-body";
 import { redisClient } from "../redis.js";
 import { createMcpServer } from "../services/mcp.js";
 import { logMcpMessage } from "./common.js";
+import { logger } from "../utils/logger.js";
 
 const MAXIMUM_MESSAGE_SIZE = "4mb";
 
@@ -25,7 +26,9 @@ function redisChannelForSession(sessionId: string): string {
 export async function handleSSEConnection(req: Request, res: Response) {
   const { server: mcpServer, cleanup: mcpCleanup }  = createMcpServer();
   const transport = new SSEServerTransport("/message", res);
-  console.info(`[session ${transport.sessionId}] Received MCP SSE connection`);
+  logger.info('Received MCP SSE connection', {
+    sessionId: transport.sessionId
+  });
 
   const redisCleanup = await redisClient.createSubscription(
     redisChannelForSession(transport.sessionId),
@@ -36,24 +39,21 @@ export async function handleSSEConnection(req: Request, res: Response) {
       const message = JSON.parse(json);
       logMcpMessage(message, transport.sessionId);
       transport.handleMessage(message).catch((error) => {
-        console.error(
-          `[session ${transport.sessionId}] Error handling message:`,
-          error,
-        );
+        logger.error('Error handling message', error as Error, {
+          sessionId: transport.sessionId
+        });
       });
     },
     (error) => {
-      console.error(
-        `[session ${transport.sessionId}] Disconnecting due to error in Redis subscriber:`,
-        error,
-      );
+      logger.error('Disconnecting due to error in Redis subscriber', error as Error, {
+        sessionId: transport.sessionId
+      });
       transport
         .close()
         .catch((error) =>
-          console.error(
-            `[session ${transport.sessionId}] Error closing transport:`,
-            error,
-          ),
+          logger.error('Error closing transport', error as Error, {
+            sessionId: transport.sessionId
+          }),
         );
     },
   );
@@ -61,17 +61,19 @@ export async function handleSSEConnection(req: Request, res: Response) {
   const cleanup = () => {
     void mcpCleanup();
     redisCleanup().catch((error) =>
-      console.error(
-        `[session ${transport.sessionId}] Error disconnecting Redis subscriber:`,
-        error,
-      ),
+      logger.error('Error disconnecting Redis subscriber', error as Error, {
+        sessionId: transport.sessionId
+      }),
     );
   }
 
   // Clean up Redis subscription when the connection closes
   mcpServer.onclose = cleanup
 
-  console.info(`[session ${transport.sessionId}] Listening on Redis channel`);
+  logger.info('Listening on Redis channel', {
+    sessionId: transport.sessionId,
+    channel: redisChannel
+  });
   await mcpServer.connect(transport);
 }
 
@@ -94,7 +96,10 @@ export async function handleMessage(req: Request, res: Response) {
     });
   } catch (error) {
     res.status(400).json(error);
-    console.error("Bad POST request:", error);
+    logger.error('Bad POST request', error as Error, {
+      sessionId,
+      contentType: req.headers['content-type']
+    });
     return;
   }
   await redisClient.publish(redisChannelForSession(sessionId), body);

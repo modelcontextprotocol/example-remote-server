@@ -1,6 +1,7 @@
 import { NextFunction, Request, Response } from "express";
 import { withContext } from "../context.js";
 import { readMcpInstallation } from "../services/auth.js";
+import { logger } from "../utils/logger.js";
 
 import { JSONRPCError, JSONRPCNotification, JSONRPCRequest, JSONRPCResponse } from "@modelcontextprotocol/sdk/types.js";
 
@@ -11,18 +12,23 @@ export function logMcpMessage(
   // check if message has a method field
   if ("method" in message) {
     if (message.method === "tools/call") {
-      console.info(
-        `[session ${sessionId}] Processing ${message.method}, for tool ${message.params?.name}`,
-      );
+      logger.info('Processing MCP method', {
+        sessionId,
+        method: message.method,
+        toolName: message.params?.name
+      });
     } else {
-      console.info(
-        `[session ${sessionId}] Processing ${message.method} method`,
-      );
-  }
+      logger.info('Processing MCP method', {
+        sessionId,
+        method: message.method
+      });
+    }
   } else if ("error" in message) {
-    console.warn(
-      `[session ${sessionId}] Received error message: ${message.error.message}, ${message.error.code}`,
-    )
+    logger.warning('Received error message', {
+      sessionId,
+      errorMessage: message.error.message,
+      errorCode: message.error.code
+    });
   }
 }
 

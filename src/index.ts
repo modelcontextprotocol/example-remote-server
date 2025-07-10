@@ -9,6 +9,7 @@ import { handleFakeAuthorize, handleFakeAuthorizeRedirect } from "./handlers/fak
 import { handleStreamableHTTP } from "./handlers/shttp.js";
 import { handleMessage, handleSSEConnection } from "./handlers/sse.js";
 import { redisClient } from "./redis.js";
+import { logger } from "./utils/logger.js";
 
 const app = express();
 
@@ -34,16 +35,29 @@ const baseSecurityHeaders = (req: express.Request, res: express.Response, next: 
   next();
 };
 
-// simple logging middleware
-const logger = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  // if GET and /mcp, log the body returned
-  console.log(`${new Date().toISOString()} ${req.method} ${req.url}`);
-  if (req.method === 'GET' && req.url.includes('/mcp')) {
-    console.log('  Body:', JSON.stringify(req.body, null, 2));
-  }
-  res.on('finish', () => {
-    console.log('  Response:', res.statusCode);
+// Structured logging middleware
+const loggingMiddleware = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const startTime = Date.now();
+  
+  // Log request
+  logger.info('Request received', {
+    method: req.method,
+    url: req.url,
+    headers: req.headers,
+    body: req.method === 'GET' && req.url.includes('/mcp') ? req.body : undefined
   });
+
+  // Log response when finished
+  res.on('finish', () => {
+    const duration = Date.now() - startTime;
+    logger.info('Request completed', {
+      method: req.method,
+      url: req.url,
+      statusCode: res.statusCode,
+      duration: `${duration}ms`
+    });
+  });
+
   next();
 };
 
@@ -73,7 +87,12 @@ const corsOptions = {
 
 
 app.use(express.json());
-app.use(logger);
+
+// Add structured logging context middleware first
+app.use(logger.middleware());
+
+// Then add the logging middleware
+app.use(loggingMiddleware);
 
 // Apply base security headers to all routes
 app.use(baseSecurityHeaders);
@@ -126,10 +145,14 @@ app.get("/fakeupstreamauth/callback", cors(corsOptions), handleFakeAuthorizeRedi
 try {
   await redisClient.connect();
 } catch (error) {
-  console.error("Could not connect to Redis:", error);
+  logger.error("Could not connect to Redis", error as Error);
   process.exit(1);
 }
 
 app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+  logger.info('Server started', {
+    port: PORT,
+    url: `http://localhost:${PORT}`,
+    environment: process.env.NODE_ENV || 'development'
+  });
 });
