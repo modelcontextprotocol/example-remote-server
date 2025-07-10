@@ -169,4 +169,4 @@ class StructuredLogger {
 export const logger = new StructuredLogger();
 
 // Re-export for convenience
-export { LogContext, StructuredLogEntry };
+export type { LogContext, StructuredLogEntry };

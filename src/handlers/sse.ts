@@ -72,7 +72,7 @@ export async function handleSSEConnection(req: Request, res: Response) {
 
   logger.info('Listening on Redis channel', {
     sessionId: transport.sessionId,
-    channel: redisChannel
+    channel: redisChannelForSession(transport.sessionId)
   });
   await mcpServer.connect(transport);
 }

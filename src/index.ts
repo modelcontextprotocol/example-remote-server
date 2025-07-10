@@ -2,6 +2,8 @@ import { BearerAuthMiddlewareOptions, requireBearerAuth } from "@modelcontextpro
 import { AuthRouterOptions, mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import cors from "cors";
 import express from "express";
+import path from "path";
+import { fileURLToPath } from "url";
 import { EverythingAuthProvider } from "./auth/provider.js";
 import { BASE_URI, PORT } from "./config.js";
 import { authContext } from "./handlers/common.js";
@@ -12,6 +14,10 @@ import { redisClient } from "./redis.js";
 import { logger } from "./utils/logger.js";
 
 const app = express();
+
+// Get the directory of the current module
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Base security middleware - applied to all routes
 const baseSecurityHeaders = (req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -150,7 +156,8 @@ app.delete("/mcp", cors(corsOptions), bearerAuth, authContext, handleStreamableH
 
 // Static assets
 app.get("/mcp-logo.png", (req, res) => {
-  res.sendFile("mcp.png", { root: "." });
+  const logoPath = path.join(__dirname, "static", "mcp.png");
+  res.sendFile(logoPath);
 });
 
 // Upstream auth routes  
