@@ -29,6 +29,10 @@ export async function handleStreamableHTTP(req: Request, res: Response) {
   });
 
   const onsessionclosed = async (sessionId: string) => {
+    logger.info('Session closed callback triggered', {
+      sessionId,
+      userId: getUserIdFromAuth(req.auth)
+    });
     await shutdownSession(sessionId);
   }
 
@@ -39,6 +43,10 @@ export async function handleStreamableHTTP(req: Request, res: Response) {
 
     // if no userid, return 401, we shouldn't get here ideally
     if (!userId) {
+      logger.warning('Request without user ID', {
+        sessionId,
+        hasAuth: !!req.auth
+      });
       res.status(401)
       return;
     }
@@ -48,14 +56,29 @@ export async function handleStreamableHTTP(req: Request, res: Response) {
     // incorrect session for the authed user, return 401
     if (sessionId) {
       if (!(await isSessionOwnedBy(sessionId, userId))) {
+        logger.warning('Session ownership mismatch', {
+          sessionId,
+          userId,
+          requestMethod: req.method
+        });
         res.status(401)
         return;
       }
       // Reuse existing transport for owned session
+      logger.info('Reusing existing session', {
+        sessionId,
+        userId,
+        isGetRequest
+      });
       shttpTransport = await getShttpTransport(sessionId, onsessionclosed, isGetRequest);
     } else if (isInitializeRequest(req.body)) {
       // New initialization request - use JSON response mode
       const onsessioninitialized = async (sessionId: string) => {
+        logger.info('Initializing new session', {
+          sessionId,
+          userId
+        });
+        
         const { server, cleanup: mcpCleanup } = createMcpServer();
 
         const serverRedisTransport = new ServerRedisTransport(sessionId);
@@ -64,6 +87,11 @@ export async function handleStreamableHTTP(req: Request, res: Response) {
       
         // Set session ownership
         await setSessionOwner(sessionId, userId);
+        
+        logger.info('Session initialized successfully', {
+          sessionId,
+          userId
+        });
       }
 
       const sessionId = randomUUID();
@@ -75,6 +103,12 @@ export async function handleStreamableHTTP(req: Request, res: Response) {
       shttpTransport.onclose = await redisRelayToMcpServer(sessionId, shttpTransport);
     } else {
       // Invalid request - no session ID and not initialization request
+      logger.warning('Invalid request: no session ID and not initialization', {
+        hasSessionId: !!sessionId,
+        isInitRequest: false,
+        userId,
+        method: req.method
+      });
       res.status(400)
       return;
     }

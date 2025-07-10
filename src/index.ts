@@ -39,12 +39,27 @@ const baseSecurityHeaders = (req: express.Request, res: express.Response, next: 
 const loggingMiddleware = (req: express.Request, res: express.Response, next: express.NextFunction) => {
   const startTime = Date.now();
   
-  // Log request
+  // Sanitize headers to remove sensitive information
+  const sanitizedHeaders = { ...req.headers };
+  delete sanitizedHeaders.authorization;
+  delete sanitizedHeaders.cookie;
+  delete sanitizedHeaders['x-api-key'];
+  
+  // Log request (without sensitive data)
   logger.info('Request received', {
     method: req.method,
     url: req.url,
-    headers: req.headers,
-    body: req.method === 'GET' && req.url.includes('/mcp') ? req.body : undefined
+    // Only log specific safe headers
+    headers: {
+      'content-type': sanitizedHeaders['content-type'],
+      'user-agent': sanitizedHeaders['user-agent'],
+      'mcp-protocol-version': sanitizedHeaders['mcp-protocol-version'],
+      'mcp-session-id': sanitizedHeaders['mcp-session-id'],
+      'accept': sanitizedHeaders['accept'],
+      'x-cloud-trace-context': sanitizedHeaders['x-cloud-trace-context']
+    },
+    // Don't log request body as it may contain sensitive data
+    bodySize: req.headers['content-length']
   });
 
   // Log response when finished
