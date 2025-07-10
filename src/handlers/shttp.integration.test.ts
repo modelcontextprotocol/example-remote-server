@@ -1,11 +1,23 @@
 import { jest } from '@jest/globals';
 import { Request, Response } from 'express';
-import { JSONRPCMessage, JSONRPCResponse } from '@modelcontextprotocol/sdk/types.js';
+import { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js';
 import { MockRedisClient, setRedisClient } from '../redis.js';
 import { handleStreamableHTTP } from './shttp.js';
 import { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 // import { randomUUID } from 'crypto'; // Currently unused but may be needed for future tests
 import { shutdownSession } from '../services/redisTransport.js';
+
+// Type for MCP initialization response
+interface MCPInitResponse {
+  jsonrpc: string;
+  id: string | number;
+  result?: {
+    _meta?: {
+      sessionId?: string;
+    };
+    [key: string]: unknown;
+  };
+}
 
 describe('Streamable HTTP Handler Integration Tests', () => {
   let mockRedis: MockRedisClient;
@@ -238,7 +250,7 @@ describe('Streamable HTTP Handler Integration Tests', () => {
       let sessionId: string | undefined;
       
       if (jsonCalls.length > 0) {
-        const response = jsonCalls[0][0] as JSONRPCResponse;
+        const response = jsonCalls[0][0] as MCPInitResponse;
         if (response?.result?._meta?.sessionId) {
           sessionId = response.result._meta.sessionId;
         }
@@ -252,7 +264,7 @@ describe('Streamable HTTP Handler Integration Tests', () => {
             try {
               // SSE data format: "data: {...}\n\n"
               const jsonStr = data.replace(/^data: /, '').trim();
-              const parsed = JSON.parse(jsonStr) as JSONRPCResponse;
+              const parsed = JSON.parse(jsonStr) as MCPInitResponse;
               if (parsed?.result?._meta?.sessionId) {
                 sessionId = parsed.result._meta.sessionId;
               }
@@ -342,7 +354,7 @@ describe('Streamable HTTP Handler Integration Tests', () => {
       // Check JSON responses
       const jsonCalls = (mockRes.json as jest.Mock).mock.calls;
       if (jsonCalls.length > 0) {
-        const response = jsonCalls[0][0] as JSONRPCResponse;
+        const response = jsonCalls[0][0] as MCPInitResponse;
         if (response?.result?._meta?.sessionId) {
           sessionId = response.result._meta.sessionId;
         }
@@ -355,7 +367,7 @@ describe('Streamable HTTP Handler Integration Tests', () => {
           if (typeof data === 'string' && data.includes('sessionId')) {
             try {
               const jsonStr = data.replace(/^data: /, '').trim();
-              const parsed = JSON.parse(jsonStr) as JSONRPCResponse;
+              const parsed = JSON.parse(jsonStr) as MCPInitResponse;
               if (parsed?.result?._meta?.sessionId) {
                 sessionId = parsed.result._meta.sessionId;
               }
@@ -442,7 +454,7 @@ describe('Streamable HTTP Handler Integration Tests', () => {
       // Check JSON responses
       const jsonCalls = (mockRes.json as jest.Mock).mock.calls;
       if (jsonCalls.length > 0) {
-        const response = jsonCalls[0][0] as JSONRPCResponse;
+        const response = jsonCalls[0][0] as MCPInitResponse;
         if (response?.result?._meta?.sessionId) {
           actualSessionId = response.result._meta.sessionId;
         }
@@ -455,7 +467,7 @@ describe('Streamable HTTP Handler Integration Tests', () => {
           if (typeof data === 'string' && data.includes('sessionId')) {
             try {
               const jsonStr = data.replace(/^data: /, '').trim();
-              const parsed = JSON.parse(jsonStr);
+              const parsed = JSON.parse(jsonStr) as MCPInitResponse;
               if (parsed?.result?._meta?.sessionId) {
                 actualSessionId = parsed.result._meta.sessionId;
               }
