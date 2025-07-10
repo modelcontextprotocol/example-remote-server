@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "build": "tsc && npm run copy-static",
+    "copy-static": "mkdir -p dist/static && cp -r src/static/* dist/static/",
     "lint": "eslint src/",
     "test": "NODE_OPTIONS=--experimental-vm-modules jest"
   },
@@ -25,11 +26,15 @@
     "typescript-eslint": "^8.18.0"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.6.1",
+    "@modelcontextprotocol/sdk": "^1.15.1",
     "@redis/client": "^1.6.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "raw-body": "^3.0.0"
+  },
+  "overrides": {
+    "@types/express": "^5.0.0",
+    "@types/express-serve-static-core": "^5.0.2"
   }
 }

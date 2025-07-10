@@ -153,10 +153,16 @@ describe("auth utils", () => {
       const first = await exchangeToken(authCode);
       expect(first).toBeDefined();
       
+      // Mock console.error to suppress expected error message
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      
       // Second exchange throws
       await expect(exchangeToken(authCode)).rejects.toThrow(
         "Duplicate use of authorization code detected"
       );
+      
+      // Restore console.error
+      consoleErrorSpy.mockRestore();
     });
     
     it("returns undefined for non-existent code", async () => {
@@ -187,6 +193,7 @@ describe("auth utils", () => {
         },
         clientId: "client-id",
         issuedAt: Date.now() / 1000,
+    userId: "test-user-id",
       }
 
       await saveMcpInstallation(accessToken, mcpInstallation);
@@ -233,6 +240,7 @@ describe("auth utils", () => {
         },
         clientId: "client-id",
         issuedAt: Date.now() / 1000,
+    userId: "test-user-id",
       });
       
       const getDel = jest.spyOn(mockRedis, 'getDel').mockImplementationOnce(() => {
@@ -246,6 +254,7 @@ describe("auth utils", () => {
           },
           clientId: "client-id",
           issuedAt: Date.now() / 1000,
+    userId: "test-user-id",
         };
         const value = JSON.stringify(mcpInstallation);
         const iv = crypto.randomBytes(16);

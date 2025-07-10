@@ -15,13 +15,16 @@ import {
   SetLevelRequestSchema,
   SubscribeRequestSchema,
   Tool,
-  ToolSchema,
   UnsubscribeRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
-type ToolInput = z.infer<typeof ToolSchema.shape.inputSchema>;
+type ToolInput = {
+  type: "object";
+  properties?: Record<string, unknown>;
+  required?: string[];
+};
 
 /* Input schemas for tools implemented in this server */
 const EchoSchema = z.object({
@@ -92,7 +95,12 @@ enum PromptName {
   RESOURCE = "resource_prompt",
 }
 
-export const createMcpServer = () => {
+interface McpServerWrapper {
+  server: Server;
+  cleanup: () => void;
+}
+
+export const createMcpServer = (): McpServerWrapper => {
   const server = new Server(
     {
       name: "example-servers/everything",

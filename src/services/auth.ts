@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { redisClient } from "../redis.js";
 import { McpInstallation, PendingAuthorization, TokenExchange } from "../types.js";
 import { OAuthClientInformationFull, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
+import { logger } from "../utils/logger.js";
 
 export function generatePKCEChallenge(verifier: string): string {
   const buffer = Buffer.from(verifier);
@@ -243,7 +244,9 @@ export async function exchangeToken(
 
   const tokenExchange: TokenExchange = JSON.parse(decoded);
   if (tokenExchange.alreadyUsed) {
-    console.error("Duplicate use of authorization code detected; revoking tokens");
+    logger.error('Duplicate use of authorization code detected; revoking tokens', undefined, {
+      authorizationCode: authorizationCode.substring(0, 8) + '...'
+    });
     await revokeMcpInstallation(tokenExchange.mcpAccessToken);
     throw new Error("Duplicate use of authorization code detected; tokens revoked");
   }
@@ -257,7 +260,9 @@ export async function exchangeToken(
 
   if (rereadData !== data) {
     // Data concurrently changed while we were updating it. This necessarily means a duplicate use.
-    console.error("Duplicate use of authorization code detected; revoking tokens");
+    logger.error('Duplicate use of authorization code detected (concurrent update); revoking tokens', undefined, {
+      authorizationCode: authorizationCode.substring(0, 8) + '...'
+    });
     await revokeMcpInstallation(tokenExchange.mcpAccessToken);
     throw new Error("Duplicate use of authorization code detected; tokens revoked");
   }

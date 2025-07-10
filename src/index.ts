@@ -1,14 +1,23 @@
+import { BearerAuthMiddlewareOptions, requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
+import { AuthRouterOptions, mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import cors from "cors";
 import express from "express";
-import { BASE_URI, PORT } from "./config.js";
-import { AuthRouterOptions, mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
+import path from "path";
+import { fileURLToPath } from "url";
 import { EverythingAuthProvider } from "./auth/provider.js";
-import { handleMessage, handleSSEConnection, authContext } from "./handlers/mcp.js";
-import { handleFakeAuthorizeRedirect, handleFakeAuthorize } from "./handlers/fakeauth.js";
+import { BASE_URI, PORT } from "./config.js";
+import { authContext } from "./handlers/common.js";
+import { handleFakeAuthorize, handleFakeAuthorizeRedirect } from "./handlers/fakeauth.js";
+import { handleStreamableHTTP } from "./handlers/shttp.js";
+import { handleMessage, handleSSEConnection } from "./handlers/sse.js";
 import { redisClient } from "./redis.js";
-import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
+import { logger } from "./utils/logger.js";
 
 const app = express();
+
+// Get the directory of the current module
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Base security middleware - applied to all routes
 const baseSecurityHeaders = (req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -32,14 +41,45 @@ const baseSecurityHeaders = (req: express.Request, res: express.Response, next: 
   next();
 };
 
-// simple logging middleware
-const logger = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.log(`${req.method} ${req.url}`);
-  next();
-  // Log the response status code
-  res.on('finish', () => {
-    console.log(`Response status code: ${res.statusCode}`);
+// Structured logging middleware
+const loggingMiddleware = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const startTime = Date.now();
+  
+  // Sanitize headers to remove sensitive information
+  const sanitizedHeaders = { ...req.headers };
+  delete sanitizedHeaders.authorization;
+  delete sanitizedHeaders.cookie;
+  delete sanitizedHeaders['x-api-key'];
+  
+  // Log request (without sensitive data)
+  logger.info('Request received', {
+    method: req.method,
+    url: req.url,
+    // Only log specific safe headers
+    headers: {
+      'content-type': sanitizedHeaders['content-type'],
+      'user-agent': sanitizedHeaders['user-agent'],
+      'mcp-protocol-version': sanitizedHeaders['mcp-protocol-version'],
+      'mcp-session-id': sanitizedHeaders['mcp-session-id'],
+      'accept': sanitizedHeaders['accept'],
+      'x-cloud-trace-context': sanitizedHeaders['x-cloud-trace-context']
+    },
+    // Don't log request body as it may contain sensitive data
+    bodySize: req.headers['content-length']
   });
+
+  // Log response when finished
+  res.on('finish', () => {
+    const duration = Date.now() - startTime;
+    logger.info('Request completed', {
+      method: req.method,
+      url: req.url,
+      statusCode: res.statusCode,
+      duration: `${duration}ms`
+    });
+  });
+
+  next();
 };
 
 
@@ -61,11 +101,19 @@ const sseHeaders = (req: express.Request, res: express.Response, next: express.N
 const corsOptions = {
   origin: true, // Allow any origin
   methods: ['GET', 'POST'],
-  allowedHeaders: ['Content-Type', 'Authorization', "MCP-Protocol-Version"],
+  allowedHeaders: ['Content-Type', 'Authorization', "Mcp-Protocol-Version", "Mcp-Protocol-Id"],
+  exposedHeaders: ["Mcp-Protocol-Version", "Mcp-Protocol-Id"],
   credentials: true
 };
 
-app.use(logger);
+
+app.use(express.json());
+
+// Add structured logging context middleware first
+app.use(logger.middleware());
+
+// Then add the logging middleware
+app.use(loggingMiddleware);
 
 // Apply base security headers to all routes
 app.use(baseSecurityHeaders);
@@ -73,6 +121,8 @@ app.use(baseSecurityHeaders);
 // Enable CORS pre-flight requests
 app.options('*', cors(corsOptions));
 
+
+const authProvider = new EverythingAuthProvider();
 // Auth configuration
 const options: AuthRouterOptions = {
   provider: new EverythingAuthProvider(),
@@ -90,24 +140,47 @@ const options: AuthRouterOptions = {
     },
   },
 };
-app.use(mcpAuthRouter(options));
-const bearerAuth = requireBearerAuth(options);
 
-// MCP routes
+const dearerAuthMiddlewareOptions: BearerAuthMiddlewareOptions = {
+  // verifyAccessToken(token: string): Promise<AuthInfo>;
+  verifier: {
+    verifyAccessToken: authProvider.verifyAccessToken.bind(authProvider),
+  }
+}
+
+app.use(mcpAuthRouter(options));
+const bearerAuth = requireBearerAuth(dearerAuthMiddlewareOptions);
+
+// MCP routes (legacy SSE transport)
 app.get("/sse", cors(corsOptions), bearerAuth, authContext, sseHeaders, handleSSEConnection);
 app.post("/message", cors(corsOptions), bearerAuth, authContext, sensitiveDataHeaders, handleMessage);
 
-// Upstream auth routes
+// MCP routes (new streamable HTTP transport)
+app.get("/mcp", cors(corsOptions), bearerAuth, authContext, handleStreamableHTTP);
+app.post("/mcp", cors(corsOptions), bearerAuth, authContext, handleStreamableHTTP);
+app.delete("/mcp", cors(corsOptions), bearerAuth, authContext, handleStreamableHTTP);
+
+// Static assets
+app.get("/mcp-logo.png", (req, res) => {
+  const logoPath = path.join(__dirname, "static", "mcp.png");
+  res.sendFile(logoPath);
+});
+
+// Upstream auth routes  
 app.get("/fakeupstreamauth/authorize", cors(corsOptions), handleFakeAuthorize);
 app.get("/fakeupstreamauth/callback", cors(corsOptions), handleFakeAuthorizeRedirect);
 
 try {
   await redisClient.connect();
 } catch (error) {
-  console.error("Could not connect to Redis:", error);
+  logger.error("Could not connect to Redis", error as Error);
   process.exit(1);
 }
 
 app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+  logger.info('Server started', {
+    port: PORT,
+    url: `http://localhost:${PORT}`,
+    environment: process.env.NODE_ENV || 'development'
+  });
 });

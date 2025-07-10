@@ -1,4 +1,5 @@
 import { createClient, SetOptions } from "@redis/client";
+import { logger } from "./utils/logger.js";
 
 /**
  * Describes the Redis primitives we use in this application, to be able to mock
@@ -8,9 +9,15 @@ export interface RedisClient {
   get(key: string): Promise<string | null>;
   set(key: string, value: string, options?: SetOptions): Promise<string | null>;
   getDel(key: string): Promise<string | null>;
+  del(key: string): Promise<number>;
+  expire(key: string, seconds: number): Promise<boolean>;
+  lpush(key: string, ...values: string[]): Promise<number>;
+  lrange(key: string, start: number, stop: number): Promise<string[]>;
   connect(): Promise<void>;
   on(event: string, callback: (error: Error) => void): void;
   options?: { url: string };
+  exists(key: string): Promise<boolean>;
+  numsub(key: string): Promise<number>;
 
   /**
    * Creates a pub/sub subscription. Returns a cleanup function to unsubscribe.
@@ -40,8 +47,13 @@ export class RedisClientImpl implements RedisClient {
 
   constructor() {
     this.redis.on("error", (error) =>
-      console.error("Redis client error:", error),
+      logger.error("Redis client error", error as Error),
     );
+  }
+
+  async numsub(key: string): Promise<number> {
+    const subs = await this.redis.pubSubNumSub(key);
+    return subs[key] || 0;
   }
 
   async get(key: string): Promise<string | null> {
@@ -58,6 +70,22 @@ export class RedisClientImpl implements RedisClient {
       value,
       options,
     );
+  }
+
+  async del(key: string): Promise<number> {
+    return await this.redis.del(key);
+  }
+
+  async expire(key: string, seconds: number): Promise<boolean> {
+    return await this.redis.expire(key, seconds);
+  }
+
+  async lpush(key: string, ...values: string[]): Promise<number> {
+    return await this.redis.lPush(key, values);
+  }
+
+  async lrange(key: string, start: number, stop: number): Promise<string[]> {
+    return await this.redis.lRange(key, start, stop);
   }
 
   async connect(): Promise<void> {
@@ -78,9 +106,15 @@ export class RedisClientImpl implements RedisClient {
     onError: (error: Error) => void,
   ): Promise<() => Promise<void>> {
     const subscriber = this.redis.duplicate();
-    subscriber.on("error", onError);
+    subscriber.on("error", (error) => {
+      onError(error);
+    });
+    
     await subscriber.connect();
-    await subscriber.subscribe(channel, onMessage);
+    
+    await subscriber.subscribe(channel, (message) => {
+      onMessage(message);
+    });
 
     return async () => {
       await subscriber.disconnect();
@@ -89,6 +123,11 @@ export class RedisClientImpl implements RedisClient {
 
   async publish(channel: string, message: string): Promise<void> {
     await this.redis.publish(channel, message);
+  }
+
+  async exists(key: string): Promise<boolean> {
+    const result = await this.redis.exists(key);
+    return result > 0;
   }
 }
 
@@ -103,7 +142,8 @@ export function setRedisClient(client: RedisClient) {
 export class MockRedisClient implements RedisClient {
   options = { url: "redis://localhost:6379" };
   private store = new Map<string, string>();
-  private subscribers = new Map<string, ((message: string) => void)[]>();
+  private lists = new Map<string, string[]>();
+  public subscribers = new Map<string, ((message: string) => void)[]>(); // Public for testing access
   private errorCallbacks = new Map<string, ((error: Error) => void)[]>();
 
   async get(key: string): Promise<string | null> {
@@ -123,6 +163,39 @@ export class MockRedisClient implements RedisClient {
     }
     this.store.set(key, value);
     return oldValue;
+  }
+
+  async del(key: string): Promise<number> {
+    let deleted = 0;
+    if (this.store.has(key)) {
+      this.store.delete(key);
+      deleted++;
+    }
+    if (this.lists.has(key)) {
+      this.lists.delete(key);
+      deleted++;
+    }
+    return deleted;
+  }
+
+  async expire(key: string, _seconds: number): Promise<boolean> {
+    // Mock implementation - just return true if key exists
+    return this.store.has(key) || this.lists.has(key);
+  }
+
+  async lpush(key: string, ...values: string[]): Promise<number> {
+    const list = this.lists.get(key) || [];
+    list.unshift(...values);
+    this.lists.set(key, list);
+    return list.length;
+  }
+
+  async lrange(key: string, start: number, stop: number): Promise<string[]> {
+    const list = this.lists.get(key) || [];
+    if (stop === -1) {
+      return list.slice(start);
+    }
+    return list.slice(start, stop + 1);
   }
 
   async connect(): Promise<void> {
@@ -183,8 +256,17 @@ export class MockRedisClient implements RedisClient {
     }
   }
 
+  async exists(key: string): Promise<boolean> {
+    return this.store.has(key) || this.lists.has(key);
+  }
+
+  async numsub(key: string): Promise<number> {
+    return (this.subscribers.get(key) || []).length;
+  }
+
   clear() {
     this.store.clear();
+    this.lists.clear();
     this.subscribers.clear();
     this.errorCallbacks.clear();
   }
