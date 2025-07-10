@@ -26,7 +26,7 @@
     "typescript-eslint": "^8.18.0"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "github:modelcontextprotocol/typescript-sdk#11e84f0",
+    "@modelcontextprotocol/sdk": "^1.15.1",
     "@redis/client": "^1.6.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
