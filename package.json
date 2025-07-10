@@ -32,5 +32,9 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "raw-body": "^3.0.0"
+  },
+  "overrides": {
+    "@types/express": "^5.0.0",
+    "@types/express-serve-static-core": "^5.0.2"
   }
 }

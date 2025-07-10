@@ -20,10 +20,6 @@ jobs:
           cache: npm
 
       - run: npm ci
-      - name: Build MCP SDK from GitHub source
-        run: |
-          cd node_modules/@modelcontextprotocol/sdk
-          npm install
       - run: npm run build
       - run: npm test
 
