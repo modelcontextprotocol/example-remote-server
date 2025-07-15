@@ -6,7 +6,8 @@
   "main": "dist/index.js",
   "scripts": {
     "start": "node dist/index.js",
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch --inspect src/index.ts",
+    "dev:break": "tsx --inspect-brk watch src/index.ts",
     "build": "tsc && npm run copy-static",
     "copy-static": "mkdir -p dist/static && cp -r src/static/* dist/static/",
     "lint": "eslint src/",

@@ -2,13 +2,10 @@ import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import contentType from "content-type";
 import { Request, Response } from "express";
-import getRawBody from "raw-body";
 import { redisClient } from "../redis.js";
 import { createMcpServer } from "../services/mcp.js";
 import { logMcpMessage } from "./common.js";
 import { logger } from "../utils/logger.js";
-
-const MAXIMUM_MESSAGE_SIZE = "4mb";
 
 declare module "express-serve-static-core" {
   interface Request {
@@ -90,10 +87,7 @@ export async function handleMessage(req: Request, res: Response) {
       throw new Error(`Unsupported content-type: ${ct}`);
     }
 
-    body = await getRawBody(req, {
-      limit: MAXIMUM_MESSAGE_SIZE,
-      encoding: ct.parameters.charset ?? "utf-8",
-    });
+    body = JSON.stringify(req.body);
   } catch (error) {
     res.status(400).json(error);
     logger.error('Bad POST request', error as Error, {

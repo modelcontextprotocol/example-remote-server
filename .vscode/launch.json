@@ -2,78 +2,31 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Debug MCP Server (tsx watch)",
       "type": "node",
-      "request": "launch",
-      "program": "${workspaceFolder}/node_modules/.bin/tsx",
-      "args": ["watch", "src/index.ts"],
-      "console": "integratedTerminal",
+      "request": "attach",
+      "name": "Attach to Dev Server",
+      "port": 9229,
       "restart": true,
       "skipFiles": ["<node_internals>/**"],
-      "env": {
-        "NODE_ENV": "development"
-      }
+      "sourceMaps": true,
+      "resolveSourceMapLocations": [
+        "${workspaceFolder}/**",
+        "!**/node_modules/**"
+      ]
     },
     {
-      "name": "Debug Jest Tests",
       "type": "node",
       "request": "launch",
-      "runtimeArgs": [
-        "--experimental-vm-modules",
-        "--inspect-brk",
-        "${workspaceFolder}/node_modules/.bin/jest",
-        "--runInBand"
-      ],
-      "console": "integratedTerminal",
-      "internalConsoleOptions": "neverOpen",
+      "name": "Debug Dev Server",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
       "skipFiles": ["<node_internals>/**"],
-      "env": {
-        "NODE_OPTIONS": "--experimental-vm-modules"
-      }
-    },
-    {
-      "name": "Debug Current Jest Test File",
-      "type": "node",
-      "request": "launch",
-      "runtimeArgs": [
-        "--experimental-vm-modules",
-        "--inspect-brk",
-        "${workspaceFolder}/node_modules/.bin/jest",
-        "--runInBand",
-        "${relativeFile}"
+      "sourceMaps": true,
+      "resolveSourceMapLocations": [
+        "${workspaceFolder}/**",
+        "!**/node_modules/**"
       ],
-      "console": "integratedTerminal",
-      "internalConsoleOptions": "neverOpen",
-      "skipFiles": ["<node_internals>/**"],
-      "env": {
-        "NODE_OPTIONS": "--experimental-vm-modules"
-      }
-    },
-    {
-      "name": "Debug Jest Test by Pattern",
-      "type": "node",
-      "request": "launch",
-      "runtimeArgs": [
-        "--experimental-vm-modules",
-        "--inspect-brk",
-        "${workspaceFolder}/node_modules/.bin/jest",
-        "--runInBand",
-        "--testNamePattern",
-        "${input:testNamePattern}"
-      ],
-      "console": "integratedTerminal",
-      "internalConsoleOptions": "neverOpen",
-      "skipFiles": ["<node_internals>/**"],
-      "env": {
-        "NODE_OPTIONS": "--experimental-vm-modules"
-      }
-    }
-  ],
-  "inputs": [
-    {
-      "id": "testNamePattern",
-      "type": "promptString",
-      "description": "Test name pattern to match (e.g., 'should trigger onsessionclosed')"
+      "console": "integratedTerminal"
     }
   ]
 }
