@@ -1,5 +1,5 @@
 import { BearerAuthMiddlewareOptions, requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
-import { AuthRouterOptions, mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
+import { AuthRouterOptions, getOAuthProtectedResourceMetadataUrl, mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import cors from "cors";
 import express from "express";
 import path from "path";
@@ -44,13 +44,13 @@ const baseSecurityHeaders = (req: express.Request, res: express.Response, next: 
 // Structured logging middleware
 const loggingMiddleware = (req: express.Request, res: express.Response, next: express.NextFunction) => {
   const startTime = Date.now();
-  
+
   // Sanitize headers to remove sensitive information
   const sanitizedHeaders = { ...req.headers };
   delete sanitizedHeaders.authorization;
   delete sanitizedHeaders.cookie;
   delete sanitizedHeaders['x-api-key'];
-  
+
   // Log request (without sensitive data)
   logger.info('Request received', {
     method: req.method,
@@ -145,7 +145,8 @@ const dearerAuthMiddlewareOptions: BearerAuthMiddlewareOptions = {
   // verifyAccessToken(token: string): Promise<AuthInfo>;
   verifier: {
     verifyAccessToken: authProvider.verifyAccessToken.bind(authProvider),
-  }
+  },
+  resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(BASE_URI),
 }
 
 app.use(mcpAuthRouter(options));
@@ -166,7 +167,7 @@ app.get("/mcp-logo.png", (req, res) => {
   res.sendFile(logoPath);
 });
 
-// Upstream auth routes  
+// Upstream auth routes
 app.get("/fakeupstreamauth/authorize", cors(corsOptions), handleFakeAuthorize);
 app.get("/fakeupstreamauth/callback", cors(corsOptions), handleFakeAuthorizeRedirect);
 
