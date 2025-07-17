@@ -146,7 +146,7 @@ const dearerAuthMiddlewareOptions: BearerAuthMiddlewareOptions = {
   verifier: {
     verifyAccessToken: authProvider.verifyAccessToken.bind(authProvider),
   },
-  resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(BASE_URI),
+  resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(new URL(BASE_URI)),
 }
 
 app.use(mcpAuthRouter(options));
