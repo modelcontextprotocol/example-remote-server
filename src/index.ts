@@ -2,6 +2,7 @@ import { BearerAuthMiddlewareOptions, requireBearerAuth } from "@modelcontextpro
 import { AuthRouterOptions, getOAuthProtectedResourceMetadataUrl, mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import cors from "cors";
 import express from "express";
+import rateLimit from "express-rate-limit";
 import path from "path";
 import { fileURLToPath } from "url";
 import { EverythingAuthProvider } from "./auth/provider.js";
@@ -15,6 +16,13 @@ import { logger } from "./utils/logger.js";
 
 const app = express();
 
+// Rate limiter for splash page
+const splashLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+});
 // Get the directory of the current module
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -168,7 +176,7 @@ app.get("/mcp-logo.png", (req, res) => {
 });
 
 // Splash page
-app.get("/", (req, res) => {
+app.get("/", splashLimiter, (req, res) => {
   const splashPath = path.join(__dirname, "static", "index.html");
   res.sendFile(splashPath);
 });
