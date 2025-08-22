@@ -32,7 +32,8 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
-    "raw-body": "^3.0.0"
+    "raw-body": "^3.0.0",
+    "express-rate-limit": "^8.0.1"
   },
   "overrides": {
     "@types/express": "^5.0.0",
