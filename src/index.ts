@@ -167,6 +167,12 @@ app.get("/mcp-logo.png", (req, res) => {
   res.sendFile(logoPath);
 });
 
+app.get("/styles.css", (req, res) => {
+  const cssPath = path.join(__dirname, "static", "styles.css");
+  res.setHeader('Content-Type', 'text/css');
+  res.sendFile(cssPath);
+});
+
 // Splash page
 app.get("/", (req, res) => {
   const splashPath = path.join(__dirname, "static", "index.html");
