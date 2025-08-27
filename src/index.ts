@@ -167,6 +167,12 @@ app.get("/mcp-logo.png", (req, res) => {
   res.sendFile(logoPath);
 });
 
+// Splash page
+app.get("/", (req, res) => {
+  const splashPath = path.join(__dirname, "static", "index.html");
+  res.sendFile(splashPath);
+});
+
 // Upstream auth routes
 app.get("/fakeupstreamauth/authorize", cors(corsOptions), handleFakeAuthorize);
 app.get("/fakeupstreamauth/callback", cors(corsOptions), handleFakeAuthorizeRedirect);
