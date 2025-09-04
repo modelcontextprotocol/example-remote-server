@@ -9,11 +9,32 @@ import { logger } from '../utils/logger.js';
  * Used when the MCP server is running in 'separate' mode.
  */
 export class ExternalAuthVerifier implements OAuthTokenVerifier {
+  // Token validation cache: token -> { authInfo, expiresAt }
+  private tokenCache = new Map<string, { authInfo: AuthInfo; expiresAt: number }>();
+  
+  // Default cache TTL: 60 seconds (conservative for security)
+  private readonly defaultCacheTTL = 60 * 1000; // milliseconds
+  
   /**
    * Creates a new external auth verifier.
    * @param authServerUrl Base URL of the external authorization server
    */
-  constructor(private authServerUrl: string) {}
+  constructor(private authServerUrl: string) {
+    // Periodically clean up expired cache entries
+    setInterval(() => this.cleanupCache(), 60 * 1000); // Every minute
+  }
+  
+  /**
+   * Removes expired entries from the cache.
+   */
+  private cleanupCache(): void {
+    const now = Date.now();
+    for (const [token, entry] of this.tokenCache.entries()) {
+      if (entry.expiresAt <= now) {
+        this.tokenCache.delete(token);
+      }
+    }
+  }
   
   /**
    * Verifies an access token by calling the external auth server's introspection endpoint.
@@ -22,6 +43,16 @@ export class ExternalAuthVerifier implements OAuthTokenVerifier {
    * @throws InvalidTokenError if the token is invalid or expired
    */
   async verifyAccessToken(token: string): Promise<AuthInfo> {
+    // Check cache first
+    const cached = this.tokenCache.get(token);
+    if (cached && cached.expiresAt > Date.now()) {
+      logger.debug('Token validation cache hit', { 
+        token: token.substring(0, 8) + '...',
+        expiresIn: Math.round((cached.expiresAt - Date.now()) / 1000) + 's'
+      });
+      return cached.authInfo;
+    }
+    
     try {
       // Token introspection is OAuth 2.0 standard (RFC 7662) for validating tokens
       // The auth server checks if the token is valid and returns metadata about it
@@ -32,6 +63,10 @@ export class ExternalAuthVerifier implements OAuthTokenVerifier {
       });
       
       if (!response.ok) {
+        // On 401/403, the token might be invalid - don't cache
+        if (response.status === 401 || response.status === 403) {
+          this.tokenCache.delete(token); // Clear any stale cache
+        }
         logger.error('Token introspection request failed', undefined, {
           status: response.status,
           statusText: response.statusText,
@@ -60,7 +95,7 @@ export class ExternalAuthVerifier implements OAuthTokenVerifier {
         });
       }
       
-      return {
+      const authInfo: AuthInfo = {
         token,
         clientId: data.client_id || 'unknown',
         scopes: data.scope?.split(' ') || [], // Empty array if no scopes specified (permissive)
@@ -73,6 +108,26 @@ export class ExternalAuthVerifier implements OAuthTokenVerifier {
           aud: data.aud,
         },
       };
+      
+      // Cache the successful introspection result
+      // Use token expiration if available, otherwise default TTL
+      const cacheDuration = data.exp 
+        ? Math.min((data.exp * 1000) - Date.now(), this.defaultCacheTTL)
+        : this.defaultCacheTTL;
+      
+      if (cacheDuration > 0) {
+        this.tokenCache.set(token, {
+          authInfo,
+          expiresAt: Date.now() + cacheDuration
+        });
+        
+        logger.debug('Token validation cached', {
+          token: token.substring(0, 8) + '...',
+          cacheDuration: Math.round(cacheDuration / 1000) + 's'
+        });
+      }
+      
+      return authInfo;
     } catch (error) {
       if (error instanceof InvalidTokenError) {
         throw error;

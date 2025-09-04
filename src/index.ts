@@ -175,23 +175,43 @@ if (AUTH_MODE === 'integrated') {
     authServerUrl: AUTH_SERVER_URL
   });
   
-  // Fetch metadata from external auth server
+  // Fetch metadata from external auth server with retry logic
   let authMetadata;
-  try {
-    const authMetadataResponse = await fetch(`${AUTH_SERVER_URL}/.well-known/oauth-authorization-server`);
-    if (!authMetadataResponse.ok) {
-      throw new Error(`Failed to fetch auth server metadata: ${authMetadataResponse.status} ${authMetadataResponse.statusText}`);
+  const maxRetries = 5;
+  const retryDelay = 3000; // 3 seconds
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      logger.info(`Attempting to connect to auth server (attempt ${attempt}/${maxRetries})`, {
+        authServerUrl: AUTH_SERVER_URL
+      });
+      
+      const authMetadataResponse = await fetch(`${AUTH_SERVER_URL}/.well-known/oauth-authorization-server`);
+      if (!authMetadataResponse.ok) {
+        throw new Error(`Failed to fetch auth server metadata: ${authMetadataResponse.status} ${authMetadataResponse.statusText}`);
+      }
+      authMetadata = await authMetadataResponse.json();
+      logger.info('Successfully fetched auth server metadata', {
+        issuer: authMetadata.issuer,
+        authorizationEndpoint: authMetadata.authorization_endpoint,
+        tokenEndpoint: authMetadata.token_endpoint
+      });
+      break; // Success, exit retry loop
+      
+    } catch (error) {
+      if (attempt < maxRetries) {
+        logger.info(`Failed to connect to auth server, retrying in ${retryDelay/1000} seconds...`, {
+          attempt,
+          maxRetries,
+          error: (error as Error).message
+        });
+        await new Promise(resolve => setTimeout(resolve, retryDelay));
+      } else {
+        logger.error('Failed to fetch auth server metadata after all retries', error as Error);
+        logger.error('Make sure the auth server is running at', undefined, { authServerUrl: AUTH_SERVER_URL });
+        process.exit(1);
+      }
     }
-    authMetadata = await authMetadataResponse.json();
-    logger.info('Successfully fetched auth server metadata', {
-      issuer: authMetadata.issuer,
-      authorizationEndpoint: authMetadata.authorization_endpoint,
-      tokenEndpoint: authMetadata.token_endpoint
-    });
-  } catch (error) {
-    logger.error('Failed to fetch auth server metadata', error as Error);
-    logger.error('Make sure the auth server is running at', undefined, { authServerUrl: AUTH_SERVER_URL });
-    process.exit(1);
   }
   
   // Serve resource metadata only (not auth endpoints)
