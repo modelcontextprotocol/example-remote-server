@@ -1,11 +1,12 @@
 import { BearerAuthMiddlewareOptions, requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
-import { AuthRouterOptions, getOAuthProtectedResourceMetadataUrl, mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
+import { AuthRouterOptions, getOAuthProtectedResourceMetadataUrl, mcpAuthRouter, mcpAuthMetadataRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import cors from "cors";
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
 import { EverythingAuthProvider } from "./auth/provider.js";
-import { BASE_URI, PORT } from "./config.js";
+import { ExternalAuthVerifier } from "./auth/external-verifier.js";
+import { BASE_URI, PORT, AUTH_MODE, AUTH_SERVER_URL } from "./config.js";
 import { authContext } from "./handlers/common.js";
 import { handleFakeAuthorize, handleFakeAuthorizeRedirect } from "./handlers/fakeauth.js";
 import { handleStreamableHTTP } from "./handlers/shttp.js";
@@ -122,35 +123,94 @@ app.use(baseSecurityHeaders);
 app.options('*', cors(corsOptions));
 
 
-const authProvider = new EverythingAuthProvider();
-// Auth configuration
-const options: AuthRouterOptions = {
-  provider: new EverythingAuthProvider(),
-  issuerUrl: new URL(BASE_URI),
-  tokenOptions: {
-    rateLimit: {
-      windowMs: 5 * 1000,
-      limit: 100,
-    }
-  },
-  clientRegistrationOptions: {
-    rateLimit: {
-      windowMs: 60 * 1000, // 1 minute
-      limit: 10, // Limit to 10 registrations per minute
+// Mode-dependent auth configuration
+let bearerAuth: express.RequestHandler;
+
+if (AUTH_MODE === 'integrated') {
+  // Integrated mode: MCP server acts as its own OAuth server
+  logger.info('Starting MCP server in INTEGRATED mode', {
+    mode: AUTH_MODE,
+    baseUri: BASE_URI,
+    port: PORT
+  });
+  
+  const authProvider = new EverythingAuthProvider();
+  
+  const authRouterOptions: AuthRouterOptions = {
+    provider: authProvider,
+    issuerUrl: new URL(BASE_URI),
+    tokenOptions: {
+      rateLimit: {
+        windowMs: 5 * 1000,
+        limit: 100,
+      }
     },
-  },
-};
-
-const dearerAuthMiddlewareOptions: BearerAuthMiddlewareOptions = {
-  // verifyAccessToken(token: string): Promise<AuthInfo>;
-  verifier: {
-    verifyAccessToken: authProvider.verifyAccessToken.bind(authProvider),
-  },
-  resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(new URL(BASE_URI)),
+    clientRegistrationOptions: {
+      rateLimit: {
+        windowMs: 60 * 1000, // 1 minute
+        limit: 10, // Limit to 10 registrations per minute
+      },
+    },
+  };
+  
+  // Serve OAuth endpoints
+  app.use(mcpAuthRouter(authRouterOptions));
+  
+  // Configure bearer auth middleware
+  const bearerAuthOptions: BearerAuthMiddlewareOptions = {
+    verifier: {
+      verifyAccessToken: authProvider.verifyAccessToken.bind(authProvider),
+    },
+    resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(new URL(BASE_URI)),
+  };
+  
+  bearerAuth = requireBearerAuth(bearerAuthOptions);
+  
+} else {
+  // Separate mode: MCP server uses external auth server
+  logger.info('Starting MCP server in SEPARATE mode', {
+    mode: AUTH_MODE,
+    baseUri: BASE_URI,
+    port: PORT,
+    authServerUrl: AUTH_SERVER_URL
+  });
+  
+  // Fetch metadata from external auth server
+  let authMetadata;
+  try {
+    const authMetadataResponse = await fetch(`${AUTH_SERVER_URL}/.well-known/oauth-authorization-server`);
+    if (!authMetadataResponse.ok) {
+      throw new Error(`Failed to fetch auth server metadata: ${authMetadataResponse.status} ${authMetadataResponse.statusText}`);
+    }
+    authMetadata = await authMetadataResponse.json();
+    logger.info('Successfully fetched auth server metadata', {
+      issuer: authMetadata.issuer,
+      authorizationEndpoint: authMetadata.authorization_endpoint,
+      tokenEndpoint: authMetadata.token_endpoint
+    });
+  } catch (error) {
+    logger.error('Failed to fetch auth server metadata', error as Error);
+    logger.error('Make sure the auth server is running at', undefined, { authServerUrl: AUTH_SERVER_URL });
+    process.exit(1);
+  }
+  
+  // Serve resource metadata only (not auth endpoints)
+  app.use(mcpAuthMetadataRouter({
+    oauthMetadata: authMetadata,
+    resourceServerUrl: new URL(BASE_URI),
+    resourceName: "MCP Everything Server"
+  }));
+  
+  // Configure bearer auth with external verifier
+  const externalVerifier = new ExternalAuthVerifier(AUTH_SERVER_URL);
+  
+  const bearerAuthOptions: BearerAuthMiddlewareOptions = {
+    verifier: externalVerifier,
+    resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(new URL(BASE_URI)),
+  };
+  
+  bearerAuth = requireBearerAuth(bearerAuthOptions);
 }
-
-app.use(mcpAuthRouter(options));
-const bearerAuth = requireBearerAuth(dearerAuthMiddlewareOptions);
 
 // MCP routes (legacy SSE transport)
 app.get("/sse", cors(corsOptions), bearerAuth, authContext, sseHeaders, handleSSEConnection);
@@ -179,9 +239,11 @@ app.get("/", (req, res) => {
   res.sendFile(splashPath);
 });
 
-// Upstream auth routes
-app.get("/fakeupstreamauth/authorize", cors(corsOptions), handleFakeAuthorize);
-app.get("/fakeupstreamauth/callback", cors(corsOptions), handleFakeAuthorizeRedirect);
+// Upstream auth routes (only in integrated mode)
+if (AUTH_MODE === 'integrated') {
+  app.get("/fakeupstreamauth/authorize", cors(corsOptions), handleFakeAuthorize);
+  app.get("/fakeupstreamauth/callback", cors(corsOptions), handleFakeAuthorizeRedirect);
+}
 
 try {
   await redisClient.connect();
