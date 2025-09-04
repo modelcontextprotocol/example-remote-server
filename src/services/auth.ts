@@ -121,6 +121,7 @@ export async function saveClientRegistration(
   await redisClient.set(
     CLIENT_REGISTRATION_KEY_PREFIX + clientId,
     JSON.stringify(registration),
+    options: { EX: REDIS_PENDING_AUTHORIZATION_EXPIRY_SEC },
   );
 }
 
