@@ -1,5 +1,6 @@
-import { OAuthTokenVerifier } from '@modelcontextprotocol/sdk/server/auth/types.js';
-import { AuthInfo, InvalidTokenError } from '@modelcontextprotocol/sdk/server/auth/types.js';
+import { OAuthTokenVerifier } from '@modelcontextprotocol/sdk/server/auth/provider.js';
+import { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
+import { InvalidTokenError } from '@modelcontextprotocol/sdk/server/auth/errors.js';
 import { TokenIntrospectionResponse } from '../../shared/types.js';
 import { logger } from '../utils/logger.js';
 
@@ -53,10 +54,8 @@ export class ExternalAuthVerifier implements OAuthTokenVerifier {
       // Extract user ID from standard 'sub' claim or custom 'userId' field
       const userId = data.sub || data.userId;
       if (!userId) {
-        logger.warn('Token introspection response missing user ID', {
-          hasS
-
-: !!data.sub,
+        logger.info('Token introspection response missing user ID', {
+          hasSub: !!data.sub,
           hasUserId: !!data.userId,
         });
       }

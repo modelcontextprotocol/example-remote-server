@@ -1,6 +1,6 @@
 import { redisClient } from "../redis.js";
 import { McpInstallation, PendingAuthorization, TokenExchange } from "../types.js";
-import { OAuthClientInformationFull, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
+import { OAuthClientInformationFull } from "@modelcontextprotocol/sdk/shared/auth.js";
 
 // Re-export from shared modules for backward compatibility
 export {
