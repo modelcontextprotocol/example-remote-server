@@ -118,24 +118,24 @@ npx -y @modelcontextprotocol/inspector
 
 #### Integrated Mode
 ```
-┌──────────┐      ┌─────────────────┐
-│   MCP    │◀────▶│   MCP Server    │
-│ Inspector│      │   (port 3232)   │
-└──────────┘      │                 │
-                  │ - OAuth Server   │
-                  │ - Resource Server│
-                  └─────────────────┘
+┌──────────┐      ┌───────────────────┐
+│   MCP    │◀────▶│   MCP Server      │
+│ Inspector│      │   (port 3232)     │
+└──────────┘      │                   │
+                  │ - OAuth Server    │
+                  │ - Resource Server │
+                  └───────────────────┘
 ```
 
 #### Separate Mode
 ```
-┌──────────┐      ┌─────────────────┐      ┌─────────────────┐
-│   MCP    │◀────▶│   MCP Server    │◀────▶│   Auth Server   │
-│ Inspector│      │   (port 3232)   │      │   (port 3001)   │
-└──────────┘      │                 │      │                 │
-     │            │ - Resource Server│      │ - OAuth Server  │
-     └───────────▶│                 │      │                 │
-                  └─────────────────┘      └─────────────────┘
+┌──────────┐      ┌───────────────────┐      ┌─────────────────┐
+│   MCP    │◀────▶│   MCP Server      │◀────▶│   Auth Server   │
+│ Inspector│      │   (port 3232)     │      │   (port 3001)   │
+└──────────┘      │                   │      │                 │
+     │            │ - Resource Server │      │ - OAuth Server  │
+     └───────────▶│                   │      │                 │
+                  └───────────────────┘      └─────────────────┘
 ```
 
 ## Installation
@@ -160,6 +160,7 @@ Install a Docker runtime:
 
 Start Redis:
 ```bash
+# see docker-compose.yml
 docker compose up -d
 ```
 

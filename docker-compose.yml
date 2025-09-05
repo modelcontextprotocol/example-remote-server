@@ -1,0 +1,8 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7.2-bookworm
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
