@@ -33,18 +33,144 @@ This server serves as both primarily as a learning resource, and an example impl
 - **Horizontal Scaling**: Any instance can handle any request
 
 ### Authentication & Security
+- **Dual Mode Support**: Run with integrated or separate authorization server
 - **[OAuth 2.0](https://modelcontextprotocol.io/specification/2025-03-26/basic/authorization)**: Complete authorization flow with PKCE support
-- **Fake Auth Provider**: Built-in testing provider with localStorage user management
-- **Session Ownership**: User isolation and access control
+- **External Auth Ready**: Demonstrates integration with external OAuth providers
+- **Session Ownership**: User isolation and access control  
 - **Security Headers**: CSP, HSTS, X-Frame-Options, and more
 - **Bearer Token Auth**: Middleware for protected endpoints
+
+## Authentication Modes
+
+The Everything Server supports two authentication modes to demonstrate different MCP deployment patterns:
+
+### Integrated Mode (Default)
+The MCP server acts as its own OAuth 2.0 authorization server. This is simpler to deploy and suitable for standalone MCP servers.
+
+```bash
+npm run dev:integrated
+```
+
+### Separate Mode
+The MCP server delegates authentication to a standalone authorization server. This demonstrates how MCP servers can integrate with existing OAuth infrastructure. See [auth-server/README.md](auth-server/README.md) for more details about the standalone auth server.
+
+```bash
+# Start both the auth server and MCP server
+npm run dev:with-separate-auth
+
+# Or run them separately:
+# Terminal 1: Start the authorization server
+npm run dev:auth-server
+
+# Terminal 2: Start the MCP server in separate mode
+npm run dev:separate
+```
+
+In production, the separate authorization server would typically be replaced with:
+- Corporate SSO (Auth0, Okta)
+- Cloud providers (AWS Cognito, Azure AD)
+- Social providers (Google, GitHub)
+
+### Testing with MCP Inspector
+
+The MCP Inspector is a web-based tool for testing MCP servers. You can run it locally:
+```bash
+npx -y @modelcontextprotocol/inspector
+```
+
+#### Integrated Mode
+```bash
+# 1. Start Redis
+docker compose up -d
+
+# 2. Start the server
+npm run dev:integrated
+
+# 3. Open MCP Inspector
+npx -y @modelcontextprotocol/inspector
+
+# 4. Connect and test:
+#    - Connect to http://localhost:3232
+#    - Navigate to the Auth tab
+#    - Complete the OAuth flow
+#    - All auth endpoints will be served from :3232
+```
+
+#### Separate Mode
+```bash
+# 1. Start Redis
+docker compose up -d
+
+# 2. Start both servers
+npm run dev:with-separate-auth
+
+# 3. Open MCP Inspector
+npx -y @modelcontextprotocol/inspector
+
+# 4. Connect and test:
+#    - Connect to http://localhost:3232
+#    - Navigate to the Auth tab
+#    - The auth flow will redirect to :3001 for authentication
+#    - After auth, tokens from :3001 will be used on :3232
+```
+
+### Architecture Diagrams
+
+#### Integrated Mode
+```
+┌──────────┐      ┌─────────────────┐
+│   MCP    │◀────▶│   MCP Server    │
+│ Inspector│      │   (port 3232)   │
+└──────────┘      │                 │
+                  │ - OAuth Server   │
+                  │ - Resource Server│
+                  └─────────────────┘
+```
+
+#### Separate Mode
+```
+┌──────────┐      ┌─────────────────┐      ┌─────────────────┐
+│   MCP    │◀────▶│   MCP Server    │◀────▶│   Auth Server   │
+│ Inspector│      │   (port 3232)   │      │   (port 3001)   │
+└──────────┘      │                 │      │                 │
+     │            │ - Resource Server│      │ - OAuth Server  │
+     └───────────▶│                 │      │                 │
+                  └─────────────────┘      └─────────────────┘
+```
 
 ## Installation
 
 ### Prerequisites
 - Node.js >= 16
-- Redis server
+- Redis server (see Redis setup below)
 - npm or yarn
+
+### Redis Setup
+The server requires Redis for session management and message routing.
+
+**Option 1: Docker Compose (Recommended)**
+
+Install a Docker runtime:
+- **macOS**: [OrbStack](https://orbstack.dev/) - Fast, lightweight, and free
+  ```bash
+  brew install orbstack
+  # Or download from https://orbstack.dev/download
+  ```
+- **Windows/Linux**: [Docker Desktop](https://www.docker.com/products/docker-desktop)
+
+Start Redis:
+```bash
+docker compose up -d
+```
+
+**Option 2: Local Installation**
+```bash
+# macOS
+brew install redis && brew services start redis
+
+# Ubuntu/Debian  
+sudo apt-get install redis-server && sudo systemctl start redis
+```
 
 ### Setup
 ```bash
@@ -62,30 +188,79 @@ cp .env.example .env
 
 ### Configuration
 Environment variables (`.env` file):
-```
-PORT=3232                          # Server port
+```bash
+# Server Configuration
+PORT=3232                          # MCP server port
 BASE_URI=http://localhost:3232     # Base URI for OAuth redirects
-REDIS_HOST=localhost               # Redis server host
-REDIS_PORT=6379                    # Redis server port
-REDIS_PASSWORD=                    # Redis password (if required)
+
+# Redis Configuration  
+REDIS_URL=redis://localhost:6379   # Redis connection URL
+
+# Authentication Mode (integrated | separate)
+AUTH_MODE=integrated               # Default: integrated mode
+
+# Separate Mode Configuration (only used when AUTH_MODE=separate)
+AUTH_SERVER_URL=http://localhost:3001  # External auth server URL
+AUTH_SERVER_PORT=3001              # Auth server port (for standalone server)
+```
+
+**Pre-configured environment files:**
+- `.env.integrated` - Configuration for integrated mode
+- `.env.separate` - Configuration for separate mode
+
+```bash
+# Use integrated mode
+cp .env.integrated .env
+
+# Use separate mode  
+cp .env.separate .env
 ```
 
 ## Development
 
 ### Commands
+
+#### Development
 ```bash
 # Start development server with hot reload
 npm run dev
 
+# Start in integrated mode (MCP server as OAuth server)
+npm run dev:integrated
+
+# Start in separate mode (external auth server)
+npm run dev:separate
+
+# Start standalone authorization server
+npm run dev:auth-server
+
+# Start both auth server and MCP server in separate mode
+npm run dev:with-separate-auth
+
 # Start development server with debugging
 npm run dev:break
+```
 
+#### Build & Production
+```bash
 # Build TypeScript to JavaScript
 npm run build
+
+# Build authorization server
+npm run build:auth-server
+
+# Build everything
+npm run build:all
 
 # Run production server
 npm start
 
+# Run production auth server
+npm run start:auth-server
+```
+
+#### Testing & Quality
+```bash
 # Run linting
 npm run lint
 
