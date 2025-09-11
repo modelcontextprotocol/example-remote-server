@@ -90,7 +90,7 @@ npm run dev:integrated
 npx -y @modelcontextprotocol/inspector
 
 # 4. Connect and test:
-#    - Connect to http://localhost:3232
+#    - Connect to http://localhost:3232/mcp
 #    - Navigate to the Auth tab
 #    - Complete the OAuth flow
 #    - All auth endpoints will be served from :3232
@@ -108,7 +108,7 @@ npm run dev:with-separate-auth
 npx -y @modelcontextprotocol/inspector
 
 # 4. Connect and test:
-#    - Connect to http://localhost:3232
+#    - Connect to http://localhost:3232/mcp
 #    - Navigate to the Auth tab
 #    - The auth flow will redirect to :3001 for authentication
 #    - After auth, tokens from :3001 will be used on :3232
@@ -117,26 +117,84 @@ npx -y @modelcontextprotocol/inspector
 ### Architecture Diagrams
 
 #### Integrated Mode
-```
-┌──────────┐      ┌───────────────────┐
-│   MCP    │◀────▶│   MCP Server      │
-│ Inspector│      │   (port 3232)     │
-└──────────┘      │                   │
-                  │ - OAuth Server    │
-                  │ - Resource Server │
-                  └───────────────────┘
+```mermaid
+graph TD
+    Client["MCP Client<br/>(Inspector)"]
+    MCP["MCP Server<br/>(port 3232)<br/>• OAuth Server<br/>• Resource Server"]
+
+    Client <-->|"OAuth flow & MCP resources"| MCP
 ```
 
 #### Separate Mode
+```mermaid
+graph TD
+    Client["MCP Client<br/>(Inspector)"]
+    MCP["MCP Server<br/>(port 3232)<br/>Resource Server"]
+    Auth["Auth Server<br/>(port 3001)<br/>OAuth Server"]
+
+    Client <-->|"1. Discover metadata"| MCP
+    Client <-->|"2. OAuth flow<br/>(register, authorize, token)"| Auth
+    Client <-->|"3. Use tokens for MCP resources"| MCP
+    MCP <-->|"Token validation<br/>(introspect)"| Auth
 ```
-┌──────────┐      ┌───────────────────┐      ┌─────────────────┐
-│   MCP    │◀────▶│   MCP Server      │◀────▶│   Auth Server   │
-│ Inspector│      │   (port 3232)     │      │   (port 3001)   │
-└──────────┘      │                   │      │                 │
-     │            │ - Resource Server │      │ - OAuth Server  │
-     └───────────▶│                   │      │                 │
-                  └───────────────────┘      └─────────────────┘
+
+## OAuth Flow Analysis
+
+### OAuth 2.0 + PKCE Flow Sequence
+
+The server implements a complete OAuth 2.0 authorization code flow with PKCE. Here's how each step maps to data storage and expiry:
+
+**1. Client Registration** (app setup - happens once)
 ```
+App → Auth Server: "I want to use OAuth, here's my info"
+Auth Server → App: "OK, your client_id is XYZ, client_secret is ABC"
+```
+- **Storage**: Client credentials for future OAuth flows
+- **Expiry**: 30 days (long-lived app credentials)
+
+**2. Authorization Request** (starts each OAuth flow)
+```
+User → App: "I want to connect to MCP server"
+App → Auth Server: "User wants access, here's my PKCE challenge"
+Auth Server: Stores pending authorization, shows auth page
+```
+- **Storage**: `PENDING_AUTHORIZATION` - temporary state during flow
+- **Expiry**: 10 minutes (short-lived temporary state)
+
+**3. Authorization Code Exchange** (completes OAuth flow)
+```
+User → Auth Server: "I approve this app"
+Auth Server → App: "Here's your authorization code"
+App → Auth Server: "Exchange code + PKCE verifier for tokens"
+Auth Server → App: "Here are your access/refresh tokens"
+```
+- **Storage**: `TOKEN_EXCHANGE` - prevents replay attacks
+- **Expiry**: 10 minutes (single-use, consumed immediately)
+
+**4. Token Storage** (long-term user session)
+```
+Auth Server: Issues access_token + refresh_token
+Server: Stores user installation with tokens
+```
+- **Storage**: `UPSTREAM_INSTALLATION` - the actual user session
+- **Expiry**: 7 days (balances security vs usability)
+
+**5. Token Refresh** (extends user session)
+```
+App → Auth Server: "My access token expired, here's my refresh token"
+Auth Server → App: "Here's a new access token"
+```
+- **Storage**: `REFRESH_TOKEN` - mapping for token rotation
+- **Expiry**: 7 days (matches installation lifetime)
+
+### Data Lifecycle Hierarchy
+
+**Timeline (shortest to longest expiry):**
+1. **OAuth flow state** (10 minutes) - very temporary
+2. **User sessions** (7 days) - medium-term
+3. **Client credentials** (30 days) - long-term
+
+This creates a logical hierarchy where each layer outlives the layers it supports.
 
 ## Installation
 

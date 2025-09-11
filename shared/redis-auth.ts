@@ -20,10 +20,11 @@ export const REDIS_KEY_PREFIXES = {
  * Redis key expiry times in seconds
  */
 export const REDIS_EXPIRY_TIMES = {
-  PENDING_AUTHORIZATION: 10 * 60,        // 10 minutes - authorization code -> PendingAuthorization
-  TOKEN_EXCHANGE: 10 * 60,               // 10 minutes - authorization code -> MCP access token
+  CLIENT_REGISTRATION: 30 * 24 * 60 * 60,  // 30 days - client app credentials
+  PENDING_AUTHORIZATION: 10 * 60,          // 10 minutes - authorization code -> PendingAuthorization
+  TOKEN_EXCHANGE: 10 * 60,                 // 10 minutes - authorization code -> MCP access token
   UPSTREAM_INSTALLATION: 7 * 24 * 60 * 60, // 7 days - MCP access token -> UpstreamInstallation
-  REFRESH_TOKEN: 7 * 24 * 60 * 60,       // 7 days - MCP refresh token -> access token
+  REFRESH_TOKEN: 7 * 24 * 60 * 60,         // 7 days - MCP refresh token -> access token
 } as const;
 
 /**
@@ -92,7 +93,8 @@ export async function saveClientRegistration(
 ): Promise<void> {
   await redisClient.set(
     REDIS_KEY_PREFIXES.CLIENT_REGISTRATION + clientId,
-    JSON.stringify(registration)
+    JSON.stringify(registration),
+    { EX: REDIS_EXPIRY_TIMES.CLIENT_REGISTRATION }
   );
 }
 

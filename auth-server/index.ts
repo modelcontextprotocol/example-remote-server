@@ -142,5 +142,5 @@ app.listen(AUTH_SERVER_PORT, () => {
   console.log('💡 To test separate mode:');
   console.log('   1. Keep this server running');
   console.log('   2. In another terminal: AUTH_MODE=separate npm run dev');
-  console.log('   3. Connect Inspector to http://localhost:3232');
+  console.log('   3. Connect Inspector to http://localhost:3232/mcp');
 });

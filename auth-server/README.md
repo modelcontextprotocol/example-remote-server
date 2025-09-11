@@ -69,7 +69,7 @@ curl http://localhost:3001/.well-known/oauth-authorization-server
 1. Start this auth server: `npm run dev:auth-server`
 2. Start MCP server in separate mode: `AUTH_MODE=separate npm run dev`
 3. Open Inspector: `npx -y @modelcontextprotocol/inspector`
-4. Connect to `http://localhost:3232`
+4. Connect to `http://localhost:3232/mcp`
 5. Auth flow will redirect to this server (port 3001)
 
 ## Configuration
