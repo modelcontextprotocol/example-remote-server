@@ -20,7 +20,9 @@
     "lint": "eslint src/ auth-server/",
     "test": "NODE_OPTIONS=--experimental-vm-modules jest",
     "test:integrated": "AUTH_MODE=integrated npm test",
-    "test:separate": "AUTH_MODE=separate npm test"
+    "test:separate": "AUTH_MODE=separate npm test",
+    "test:e2e:integrated": "concurrently --kill-others --success first \"npm run dev:integrated\" \"sleep 4 && ./scripts/test-integrated-e2e.sh\"",
+    "test:e2e:separate": "concurrently --kill-others --success first \"npm run dev:with-separate-auth\" \"sleep 6 && ./scripts/test-separate-e2e.sh\""
   },
   "devDependencies": {
     "@eslint/js": "^9.15.0",
@@ -42,6 +44,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "express-rate-limit": "^8.0.1",
     "raw-body": "^3.0.0"
   },
   "overrides": {

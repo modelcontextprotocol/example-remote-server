@@ -1,6 +1,7 @@
 import { BearerAuthMiddlewareOptions, requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import { AuthRouterOptions, getOAuthProtectedResourceMetadataUrl, mcpAuthRouter, mcpAuthMetadataRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import cors from "cors";
+import rateLimit from "express-rate-limit";
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -122,6 +123,18 @@ app.use(baseSecurityHeaders);
 // Enable CORS pre-flight requests
 app.options('*', cors(corsOptions));
 
+// Rate limiting for custom endpoints
+const fakeAuthRateLimit = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  limit: 20, // 20 auth attempts per minute
+  message: { error: 'too_many_requests', error_description: 'Authentication rate limit exceeded' }
+});
+
+const staticFileRateLimit = rateLimit({
+  windowMs: 10 * 60 * 1000, // 10 minutes
+  limit: 25, // 25 requests per 10 minutes for static files
+  message: { error: 'too_many_requests', error_description: 'Static file rate limit exceeded' }
+});
 
 // Mode-dependent auth configuration
 let bearerAuth: express.RequestHandler;
@@ -242,12 +255,12 @@ app.post("/mcp", cors(corsOptions), bearerAuth, authContext, handleStreamableHTT
 app.delete("/mcp", cors(corsOptions), bearerAuth, authContext, handleStreamableHTTP);
 
 // Static assets
-app.get("/mcp-logo.png", (req, res) => {
+app.get("/mcp-logo.png", staticFileRateLimit, (req, res) => {
   const logoPath = path.join(__dirname, "static", "mcp.png");
   res.sendFile(logoPath);
 });
 
-app.get("/styles.css", (req, res) => {
+app.get("/styles.css", staticFileRateLimit, (req, res) => {
   const cssPath = path.join(__dirname, "static", "styles.css");
   res.setHeader('Content-Type', 'text/css');
   res.sendFile(cssPath);
@@ -261,8 +274,8 @@ app.get("/", (req, res) => {
 
 // Upstream auth routes (only in integrated mode)
 if (AUTH_MODE === 'integrated') {
-  app.get("/fakeupstreamauth/authorize", cors(corsOptions), handleFakeAuthorize);
-  app.get("/fakeupstreamauth/callback", cors(corsOptions), handleFakeAuthorizeRedirect);
+  app.get("/fakeupstreamauth/authorize", fakeAuthRateLimit, cors(corsOptions), handleFakeAuthorize);
+  app.get("/fakeupstreamauth/callback", fakeAuthRateLimit, cors(corsOptions), handleFakeAuthorizeRedirect);
 }
 
 try {

@@ -210,8 +210,12 @@ npm run start:auth-server
 # Run linting
 npm run lint
 
-# Run tests
+# Run unit tests
 npm test
+
+# Run end-to-end tests (automated server management)
+npm run test:e2e:integrated    # Test integrated mode OAuth + features
+npm run test:e2e:separate      # Test separate mode OAuth + features
 ```
 
 ### Testing with MCP Inspector
@@ -283,14 +287,16 @@ The `scripts/` directory contains automated test scripts that verify the complet
 
 #### Usage
 ```bash
-# Test integrated mode
-./scripts/test-integrated-e2e.sh
+# Recommended: Automated testing (handles server lifecycle)
+npm run test:e2e:integrated    # Tests integrated mode
+npm run test:e2e:separate      # Tests separate mode
 
-# Test separate mode  
+# Advanced: Manual script execution (requires manual server setup)  
+./scripts/test-integrated-e2e.sh
 ./scripts/test-separate-e2e.sh
 ```
 
-**Prerequisites:** Scripts check for Redis and servers, providing setup instructions if missing.
+The npm scripts automatically start required servers, run tests, and clean up. Manual scripts require you to start Redis and servers first.
 
 ### Interactive Testing
 Use the MCP Inspector for interactive testing and debugging of OAuth flows, tool execution, and resource access.
@@ -405,9 +411,9 @@ This creates a logical hierarchy where each layer outlives the layers it support
 │   ├── auth-core.ts             # Core auth logic
 │   ├── redis-auth.ts            # Redis auth operations
 │   └── types.ts                 # Shared type definitions
-├── scripts/                     # Automated testing scripts
-│   ├── test-integrated-e2e.sh   # End-to-end test for integrated mode
-│   └── test-separate-e2e.sh     # End-to-end test for separate mode
+├── scripts/                     # End-to-end testing scripts
+│   ├── test-integrated-e2e.sh   # OAuth + feature verification (integrated)
+│   └── test-separate-e2e.sh     # OAuth + feature verification (separate)
 ├── docs/
 │   ├── streamable-http-design.md  # SHTTP implementation details
 │   └── user-id-system.md          # Authentication flow documentation

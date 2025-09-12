@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import rateLimit from 'express-rate-limit';
 import { mcpAuthRouter } from '@modelcontextprotocol/sdk/server/auth/router.js';
 import { EverythingAuthProvider } from '../src/auth/provider.js';
 import { handleFakeAuthorize, handleFakeAuthorizeRedirect } from '../src/handlers/fakeauth.js';
@@ -59,8 +60,21 @@ app.use(mcpAuthRouter({
   }
 }));
 
+// Rate limiting for custom endpoints
+const introspectRateLimit = rateLimit({
+  windowMs: 5 * 60 * 1000, // 5 minutes
+  limit: 100, // 100 introspections per 5 minutes
+  message: { error: 'too_many_requests', error_description: 'Token introspection rate limit exceeded' }
+});
+
+const fakeAuthRateLimit = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  limit: 20, // 20 auth attempts per minute
+  message: { error: 'too_many_requests', error_description: 'Authentication rate limit exceeded' }
+});
+
 // Token introspection endpoint (RFC 7662)
-app.post('/introspect', express.urlencoded({ extended: false }), async (req, res) => {
+app.post('/introspect', introspectRateLimit, express.urlencoded({ extended: false }), async (req, res) => {
   try {
     const { token } = req.body;
     
@@ -96,8 +110,8 @@ app.post('/introspect', express.urlencoded({ extended: false }), async (req, res
 });
 
 // Fake upstream auth endpoints (for user authentication simulation)
-app.get('/fakeupstreamauth/authorize', cors(), handleFakeAuthorize);
-app.get('/fakeupstreamauth/callback', cors(), handleFakeAuthorizeRedirect);
+app.get('/fakeupstreamauth/authorize', fakeAuthRateLimit, cors(), handleFakeAuthorize);
+app.get('/fakeupstreamauth/callback', fakeAuthRateLimit, cors(), handleFakeAuthorizeRedirect);
 
 // Static assets (for auth page styling)
 import path from 'path';
