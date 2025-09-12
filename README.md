@@ -14,6 +14,21 @@ The Everything Server is an open-source reference implementation that showcases:
 
 This server serves as both primarily as a learning resource, and an example implementation of a scalable remote MCP server.
 
+## Table of Contents
+
+- [Features](#features)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Authentication Modes](#authentication-modes)
+- [Development](#development)
+  - [Automated End-to-End Testing](#automated-end-to-end-testing)
+  - [Interactive Testing](#interactive-testing)
+- [Architecture & Technical Details](#architecture--technical-details)
+- [API Reference](#api-reference)
+- [Security](#security)
+- [Monitoring & Debugging](#monitoring--debugging)
+- [Contributing](#contributing)
+
 ## Features
 
 ### MCP Protocol Features
@@ -252,7 +267,32 @@ npm test -- --coverage
 - **Auth Tests**: OAuth flow and session ownership
 - **Multi-user Tests**: User isolation and access control
 
-### Additional Testing
+### Automated End-to-End Testing
+
+The `scripts/` directory contains automated test scripts that verify the complete OAuth flow and all MCP features:
+
+#### Scripts
+- **`test-integrated-e2e.sh`** - Tests integrated mode (MCP server as OAuth server)
+- **`test-separate-e2e.sh`** - Tests separate mode (external auth server)
+
+#### What the scripts test:
+- Complete OAuth 2.0 + PKCE flow from client registration to token usage
+- All MCP features: tools (7), resources (100 with pagination), prompts (3)
+- Session management and proper error handling
+- README claim verification
+
+#### Usage
+```bash
+# Test integrated mode
+./scripts/test-integrated-e2e.sh
+
+# Test separate mode  
+./scripts/test-separate-e2e.sh
+```
+
+**Prerequisites:** Scripts check for Redis and servers, providing setup instructions if missing.
+
+### Interactive Testing
 Use the MCP Inspector for interactive testing and debugging of OAuth flows, tool execution, and resource access.
 
 ## Architecture & Technical Details
@@ -365,6 +405,9 @@ This creates a logical hierarchy where each layer outlives the layers it support
 │   ├── auth-core.ts             # Core auth logic
 │   ├── redis-auth.ts            # Redis auth operations
 │   └── types.ts                 # Shared type definitions
+├── scripts/                     # Automated testing scripts
+│   ├── test-integrated-e2e.sh   # End-to-end test for integrated mode
+│   └── test-separate-e2e.sh     # End-to-end test for separate mode
 ├── docs/
 │   ├── streamable-http-design.md  # SHTTP implementation details
 │   └── user-id-system.md          # Authentication flow documentation
