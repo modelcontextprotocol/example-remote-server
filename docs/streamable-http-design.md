@@ -1,21 +1,30 @@
-# Design Document: Implementing Streamable HTTP Transport for Example Remote Server
+# Design Document: Streamable HTTP Transport Implementation
 
-## Research Summary
+## Current Implementation
 
-### Current SSE Transport Architecture
+### Dual Transport Architecture
 
-The example remote server currently uses the following architecture:
+The example remote server implements both transport methods:
 
+**Legacy SSE Transport:**
 1. **SSE Endpoint**: `/sse` - Creates SSE connection using `SSEServerTransport`
 2. **Message Endpoint**: `/message` - Receives POST requests and forwards them via Redis
-3. **Redis Integration**: Messages are published/subscribed through Redis channels using session IDs
-4. **Auth**: Uses `requireBearerAuth` middleware with `EverythingAuthProvider`
-5. **Session Management**: Each SSE connection gets a unique session ID used as Redis channel key
+
+**Modern Streamable HTTP Transport:**
+1. **Unified Endpoint**: `/mcp` - Handles GET, POST, DELETE with `StreamableHTTPServerTransport`
+2. **Stateful Sessions**: Requires initialization and session ID tracking
+3. **SSE Response Format**: Returns results via Server-Sent Events streams
+
+**Shared Infrastructure:**
+1. **Redis Integration**: Messages published/subscribed through Redis channels using session IDs
+2. **Auth**: Uses `requireBearerAuth` middleware with mode-dependent auth providers
+3. **Session Management**: Session ownership tracked via Redis for multi-user isolation
 
 **Key Files:**
-- `/src/index.ts:91` - SSE endpoint with auth and headers
-- `/src/handlers/mcp.ts:55-118` - SSE connection handler with Redis integration
-- `/src/handlers/mcp.ts:120-144` - Message POST handler
+- `/src/index.ts:156-162` - SSE and Streamable HTTP endpoints with auth
+- `/src/handlers/sse.ts` - SSE connection handler with Redis integration
+- `/src/handlers/shttp.ts` - Streamable HTTP handler
+- `/src/services/mcp.ts` - MCP server implementation with tools, resources, prompts
 
 ### Streamable HTTP Transport Specification (2025-03-26)
 
