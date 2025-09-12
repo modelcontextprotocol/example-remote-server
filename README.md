@@ -189,14 +189,8 @@ npm run dev:break
 
 #### Build & Production
 ```bash
-# Build TypeScript to JavaScript
+# Build TypeScript to JavaScript (builds both servers)
 npm run build
-
-# Build authorization server
-npm run build:auth-server
-
-# Build everything
-npm run build:all
 
 # Run production server
 npm start
