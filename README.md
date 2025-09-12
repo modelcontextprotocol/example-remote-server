@@ -14,15 +14,45 @@ The Everything Server is an open-source reference implementation that showcases:
 
 This server serves as both primarily as a learning resource, and an example implementation of a scalable remote MCP server.
 
+## Quick Start
+
+Get the server running in 5 minutes:
+
+```bash
+# 1. Prerequisites
+brew install orbstack       # macOS: Install OrbStack (skip if already installed)
+orbctl start                # macOS: Start OrbStack daemon
+# OR install Docker Desktop and start it (Windows/Linux/macOS alternative)
+
+# 2. Setup
+git clone https://github.com/modelcontextprotocol/example-remote-server.git
+cd example-remote-server
+npm install
+cp .env.integrated .env     # Configure for integrated mode (see Authentication Modes for details)
+
+# 3. Start services
+docker compose up -d        # Start Redis
+npm run dev                 # Start server
+
+# 4. Test with Inspector
+npx -y @modelcontextprotocol/inspector
+# Connect to http://localhost:3232/mcp
+```
+
+For detailed instructions, see [Installation](#installation).
+
 ## Table of Contents
 
+- [Quick Start](#quick-start)
 - [Features](#features)
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Authentication Modes](#authentication-modes)
 - [Development](#development)
+  - [Testing with MCP Inspector](#testing-with-mcp-inspector)
   - [Automated End-to-End Testing](#automated-end-to-end-testing)
   - [Interactive Testing](#interactive-testing)
+- [Troubleshooting](#troubleshooting)
 - [Architecture & Technical Details](#architecture--technical-details)
 - [API Reference](#api-reference)
 - [Security](#security)
@@ -59,45 +89,64 @@ This server serves as both primarily as a learning resource, and an example impl
 
 ### Prerequisites
 - Node.js >= 16
-- Redis server (see Redis setup below)
 - npm or yarn
+- Docker runtime (for Redis)
 
-### Redis Setup
-The server requires Redis for session management and message routing.
+### Step 1: Install Docker Runtime
+Choose one option:
 
-**Option 1: Docker Compose (Recommended)**
-
-Install a Docker runtime:
-- **macOS**: [OrbStack](https://orbstack.dev/) - Fast, lightweight, and free
-  ```bash
-  brew install orbstack
-  # Or download from https://orbstack.dev/download
-  ```
-- **Windows/Linux**: [Docker Desktop](https://www.docker.com/products/docker-desktop)
-
-Start Redis:
+**macOS (Recommended: OrbStack)**
 ```bash
-# see docker-compose.yml
-docker compose up -d
+brew install orbstack
+# Start OrbStack daemon (required before using Docker commands)
+orbctl start
+# Or download from https://orbstack.dev/download
 ```
 
-**Option 2: Local Installation**
+**Windows/Linux: Docker Desktop**
+- Download from https://www.docker.com/products/docker-desktop
+- Start Docker Desktop after installation
+
+**Alternative: Local Redis Installation**
 ```bash
 # macOS
 brew install redis && brew services start redis
 
-# Ubuntu/Debian  
+# Ubuntu/Debian
 sudo apt-get install redis-server && sudo systemctl start redis
 ```
 
-### Setup
+### Step 2: Clone and Install Dependencies
 ```bash
-# Clone the repository
 git clone https://github.com/modelcontextprotocol/example-remote-server.git
 cd example-remote-server
-
-# Install dependencies
 npm install
+```
+
+### Step 3: Configure Environment
+```bash
+# Use integrated mode (default, simpler setup)
+cp .env.integrated .env
+
+# OR use separate mode (for testing external auth)
+cp .env.separate .env
+```
+
+### Step 4: Start Redis
+```bash
+# Ensure Docker/OrbStack is running first!
+docker compose up -d
+
+# Verify Redis is running
+docker compose ps
+```
+
+### Step 5: Verify Installation
+```bash
+# Run the development server
+npm run dev
+
+# Server should start on http://localhost:3232
 ```
 
 ## Configuration
@@ -164,9 +213,18 @@ In production, the separate authorization server would typically be replaced wit
 
 ## Development
 
-### Commands
+### Quick Start
+If you've completed installation, you're ready to develop:
 
-#### Development
+```bash
+# Integrated mode (MCP server handles auth)
+npm run dev:integrated
+
+# Separate mode (external auth server)
+npm run dev:with-separate-auth
+```
+
+### Development Commands
 ```bash
 # Start development server with hot reload
 npm run dev
@@ -214,36 +272,35 @@ npm run test:e2e:separate      # Test separate mode OAuth + features
 
 ### Testing with MCP Inspector
 
-The MCP Inspector is a web-based tool for testing MCP servers:
-```bash
-npx -y @modelcontextprotocol/inspector
-```
+The MCP Inspector is a web-based tool for testing MCP servers.
+
+#### Prerequisites
+1. Ensure Docker/OrbStack is running
+2. Ensure Redis is running: `docker compose ps`
+3. Ensure environment is configured: Check `.env` file exists
 
 #### Test Integrated Mode
 ```bash
-# 1. Start Redis
-docker compose up -d
-
-# 2. Start the server
+# 1. Start the server (Redis must already be running)
 npm run dev:integrated
 
-# 3. Open MCP Inspector and connect to http://localhost:3232/mcp
-# 4. Navigate to the Auth tab and complete the OAuth flow
-# 5. All auth endpoints will be served from :3232
+# 2. Launch MCP Inspector in a new terminal
+npx -y @modelcontextprotocol/inspector
+
+# 3. Connect to: http://localhost:3232/mcp
+# 4. Navigate to Auth tab and complete OAuth flow
 ```
 
 #### Test Separate Mode
 ```bash
-# 1. Start Redis
-docker compose up -d
-
-# 2. Start both servers
+# 1. Start both servers (Redis must already be running)
 npm run dev:with-separate-auth
 
-# 3. Open MCP Inspector and connect to http://localhost:3232/mcp
-# 4. Navigate to the Auth tab
-# 5. The auth flow will redirect to :3001 for authentication
-# 6. After auth, tokens from :3001 will be used on :3232
+# 2. Launch MCP Inspector in a new terminal
+npx -y @modelcontextprotocol/inspector
+
+# 3. Connect to: http://localhost:3232/mcp
+# 4. Auth flow will redirect to :3001 for authentication
 ```
 
 ### Running Tests
@@ -294,6 +351,38 @@ The npm scripts automatically start required servers, run tests, and clean up. M
 
 ### Interactive Testing
 Use the MCP Inspector for interactive testing and debugging of OAuth flows, tool execution, and resource access.
+
+## Troubleshooting
+
+### Common Issues
+
+**"Cannot connect to Docker daemon"**
+- Ensure Docker Desktop or OrbStack daemon is running
+- macOS with OrbStack: `orbctl start` (verify with `orbctl status`)
+- Windows/Linux/macOS with Docker Desktop: Start Docker Desktop application
+
+**"Redis connection refused"**
+- Check Redis is running: `docker compose ps`
+- If not running: `docker compose up -d`
+- Ensure Docker/OrbStack is started first
+
+**"Missing .env file"**
+- Run `cp .env.integrated .env` for default setup
+- Or `cp .env.separate .env` for separate auth mode
+
+**"Port already in use"**
+- Check for existing processes: `lsof -i :3232` or `lsof -i :3001`
+- Kill existing processes or change PORT in .env
+
+**"npm install fails"**
+- Ensure Node.js >= 16 is installed: `node --version`
+- Clear npm cache: `npm cache clean --force`
+- Delete node_modules and package-lock.json, then retry
+
+**"Authentication flow fails"**
+- Check the server logs for error messages
+- Ensure Redis is running and accessible
+- Verify .env configuration matches your setup mode
 
 ## Architecture & Technical Details
 
