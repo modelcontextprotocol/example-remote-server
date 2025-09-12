@@ -73,6 +73,12 @@ const fakeAuthRateLimit = rateLimit({
   message: { error: 'too_many_requests', error_description: 'Authentication rate limit exceeded' }
 });
 
+const staticFileRateLimit = rateLimit({
+  windowMs: 10 * 60 * 1000, // 10 minutes
+  limit: 25, // 25 requests per 10 minutes for static files
+  message: { error: 'too_many_requests', error_description: 'Static file rate limit exceeded' }
+});
+
 // Token introspection endpoint (RFC 7662)
 app.post('/introspect', introspectRateLimit, express.urlencoded({ extended: false }), async (req, res) => {
   try {
