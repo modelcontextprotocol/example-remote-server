@@ -1,35 +1,32 @@
 # MCP Standalone Authorization Server
 
-This is a demonstration OAuth 2.0 authorization server for MCP.
+This is a demonstration OAuth 2.0 authorization server for MCP's separate authentication mode.
 
 ## Purpose
 
-This server demonstrates how MCP servers can delegate authentication to a separate 
-authorization server (Mode 2 in our implementation). In production environments, 
-you would typically use established OAuth providers like:
+This server demonstrates how MCP servers can delegate authentication to a separate authorization server. See the main [README Authentication Modes](../README.md#authentication-modes) section for a complete overview of integrated vs separate modes.
 
-- Auth0
-- Okta
-- Google OAuth
-- GitHub OAuth
-- Microsoft Azure AD
+In production environments, you would typically use established OAuth providers like:
+- Auth0, Okta
+- Google OAuth, GitHub OAuth  
+- Microsoft Azure AD, AWS Cognito
 
 ## Architecture
 
-When running in separate mode, the architecture looks like:
+For detailed architecture information and OAuth flow analysis, see:
+- [Authentication Modes](../README.md#authentication-modes) - Overview and comparison
+- [OAuth 2.0 + PKCE Flow Analysis](../README.md#oauth-20--pkce-flow-analysis) - Step-by-step flow breakdown
+- [Authentication Architecture](../README.md#authentication-architecture) - Visual diagrams
 
-1. MCP Client (e.g., Inspector) discovers auth server URL from MCP server metadata
-2. Client registers and authenticates directly with this auth server
-3. Auth server issues tokens
-4. MCP server validates tokens by calling this auth server's introspection endpoint
+This auth server specifically implements the "Auth Server" component in the separate mode architecture diagram.
 
 ## Endpoints
 
 - `/.well-known/oauth-authorization-server` - OAuth 2.0 server metadata
-- `/oauth/authorize` - Authorization endpoint
-- `/oauth/token` - Token endpoint
-- `/oauth/register` - Dynamic client registration
-- `/oauth/introspect` - Token introspection (for MCP server validation)
+- `/authorize` - Authorization endpoint
+- `/token` - Token endpoint  
+- `/register` - Dynamic client registration
+- `/introspect` - Token introspection (for MCP server validation)
 - `/fakeupstreamauth/authorize` - Fake upstream auth page (demo only)
 - `/fakeupstreamauth/callback` - Fake upstream callback (demo only)
 - `/health` - Health check endpoint
@@ -66,24 +63,32 @@ curl http://localhost:3001/.well-known/oauth-authorization-server
 ```
 
 ### With MCP Inspector
+See the main [Testing with MCP Inspector](../README.md#testing-with-mcp-inspector) section for complete testing instructions for both modes.
+
+**Quick test for this auth server:**
 1. Start this auth server: `npm run dev:auth-server`
-2. Start MCP server in separate mode: `AUTH_MODE=separate npm run dev`
-3. Open Inspector: `npx -y @modelcontextprotocol/inspector`
-4. Connect to `http://localhost:3232/mcp`
-5. Auth flow will redirect to this server (port 3001)
+2. Start MCP server in separate mode: `AUTH_MODE=separate npm run dev` 
+3. Follow the separate mode testing steps in the main README
 
 ## Configuration
 
-The auth server uses the same environment variables as the main server:
+The auth server uses the same configuration system as the main server. See [Configuration](../README.md#configuration) in the main README for complete environment variable documentation.
+
+**Auth server specific variables:**
 - `AUTH_SERVER_PORT` - Port to run on (default: 3001)
 - `AUTH_SERVER_URL` - Base URL (default: http://localhost:3001)
 - `REDIS_URL` - Redis connection (shared with MCP server)
 
 ## Production Considerations
 
-In production:
-- Use real OAuth providers instead of this demonstration server
-- Separate Redis instances for auth and resource servers
-- Enable HTTPS with proper certificates
-- Implement proper rate limiting and monitoring
-- Use secure client secrets and token rotation
+**This server is for demonstration only.** In production, use established OAuth providers.
+
+For comprehensive security and deployment guidance, see:
+- [Security](../README.md#security) - Security measures and best practices
+- [Configuration](../README.md#configuration) - Environment setup
+- [Monitoring & Debugging](../README.md#monitoring--debugging) - Operational guidance
+
+**Production replacement options:**
+- Corporate SSO (Auth0, Okta)
+- Cloud providers (AWS Cognito, Azure AD)  
+- Social providers (Google OAuth, GitHub OAuth)

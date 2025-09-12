@@ -56,7 +56,7 @@ export class ExternalAuthVerifier implements OAuthTokenVerifier {
     try {
       // Token introspection is OAuth 2.0 standard (RFC 7662) for validating tokens
       // The auth server checks if the token is valid and returns metadata about it
-      const response = await fetch(`${this.authServerUrl}/oauth/introspect`, {
+      const response = await fetch(`${this.authServerUrl}/introspect`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: `token=${encodeURIComponent(token)}`,

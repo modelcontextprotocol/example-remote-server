@@ -36,10 +36,10 @@ app.get('/health', (req, res) => {
     mode: 'authorization-server',
     endpoints: {
       metadata: `${AUTH_SERVER_URL}/.well-known/oauth-authorization-server`,
-      authorize: `${AUTH_SERVER_URL}/oauth/authorize`,
-      token: `${AUTH_SERVER_URL}/oauth/token`,
-      register: `${AUTH_SERVER_URL}/oauth/register`,
-      introspect: `${AUTH_SERVER_URL}/oauth/introspect`
+      authorize: `${AUTH_SERVER_URL}/authorize`,
+      token: `${AUTH_SERVER_URL}/token`,
+      register: `${AUTH_SERVER_URL}/register`,
+      introspect: `${AUTH_SERVER_URL}/introspect`
     }
   });
 });
@@ -60,7 +60,7 @@ app.use(mcpAuthRouter({
 }));
 
 // Token introspection endpoint (RFC 7662)
-app.post('/oauth/introspect', express.urlencoded({ extended: false }), async (req, res) => {
+app.post('/introspect', express.urlencoded({ extended: false }), async (req, res) => {
   try {
     const { token } = req.body;
     
@@ -127,10 +127,10 @@ app.listen(AUTH_SERVER_PORT, () => {
     url: AUTH_SERVER_URL,
     endpoints: {
       metadata: `${AUTH_SERVER_URL}/.well-known/oauth-authorization-server`,
-      authorize: `${AUTH_SERVER_URL}/oauth/authorize`,
-      token: `${AUTH_SERVER_URL}/oauth/token`,
-      register: `${AUTH_SERVER_URL}/oauth/register`,
-      introspect: `${AUTH_SERVER_URL}/oauth/introspect`
+      authorize: `${AUTH_SERVER_URL}/authorize`,
+      token: `${AUTH_SERVER_URL}/token`,
+      register: `${AUTH_SERVER_URL}/register`,
+      introspect: `${AUTH_SERVER_URL}/introspect`
     }
   });
   
