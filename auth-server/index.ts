@@ -120,7 +120,7 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-app.get('/mcp-logo.png', (req, res) => {
+app.get('/mcp-logo.png', staticFileRateLimit, (req, res) => {
   // Serve from the main server's static directory
   const logoPath = path.join(__dirname, '../src/static/mcp.png');
   res.sendFile(logoPath);
