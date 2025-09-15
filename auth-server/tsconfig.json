@@ -1,9 +1,0 @@
-{
-  "extends": "../tsconfig.json",
-  "compilerOptions": {
-    "outDir": "../dist/auth-server",
-    "rootDir": "../"
-  },
-  "include": ["index.ts", "../src/**/*.ts", "../shared/**/*.ts"],
-  "exclude": ["../dist", "../node_modules", "../**/*.test.ts"]
-}

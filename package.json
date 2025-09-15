@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "description": "Example MCP Server",
   "type": "module",
-  "main": "dist/index.js",
+  "main": "dist/src/index.js",
   "scripts": {
-    "start": "node dist/index.js",
+    "start": "node dist/src/index.js",
     "start:auth-server": "node dist/auth-server/index.js",
     "dev": "tsx watch --inspect src/index.ts",
     "dev:break": "tsx --inspect-brk watch src/index.ts",
@@ -13,14 +13,14 @@
     "dev:separate": "AUTH_MODE=separate AUTH_SERVER_URL=http://localhost:3001 npm run dev",
     "dev:auth-server": "AUTH_SERVER_PORT=3001 tsx watch --inspect auth-server/index.ts",
     "dev:with-separate-auth": "concurrently -n \"AUTH,MCP\" -c \"yellow,cyan\" \"npm run dev:auth-server\" \"npm run dev:separate\"",
-    "build": "tsc && tsc -p auth-server/tsconfig.json && npm run copy-static",
-    "copy-static": "mkdir -p dist/static && cp -r src/static/* dist/static/",
+    "build": "tsc && npm run copy-static",
+    "copy-static": "mkdir -p dist/src/static && cp -r src/static/* dist/src/static/",
     "lint": "eslint src/ auth-server/",
     "test": "NODE_OPTIONS=--experimental-vm-modules jest",
     "test:integrated": "AUTH_MODE=integrated npm test",
     "test:separate": "AUTH_MODE=separate npm test",
-    "test:e2e:integrated": "concurrently --kill-others --success first \"npm run dev:integrated\" \"sleep 4 && ./scripts/test-integrated-e2e.sh\"",
-    "test:e2e:separate": "concurrently --kill-others --success first \"npm run dev:with-separate-auth\" \"sleep 6 && ./scripts/test-separate-e2e.sh\""
+    "test:e2e:integrated": "./scripts/test-integrated-e2e.sh",
+    "test:e2e:separate": "./scripts/test-separate-e2e.sh"
   },
   "devDependencies": {
     "@eslint/js": "^9.15.0",

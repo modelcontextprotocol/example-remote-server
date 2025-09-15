@@ -153,7 +153,7 @@ app.listen(AUTH_SERVER_PORT, () => {
       introspect: `${AUTH_SERVER_URL}/introspect`
     }
   });
-  
+
   console.log('');
   console.log('🚀 Auth server ready! Test with:');
   console.log(`   curl ${AUTH_SERVER_URL}/health`);

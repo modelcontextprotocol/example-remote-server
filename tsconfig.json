@@ -12,6 +12,6 @@
     "isolatedModules": true,
     "skipLibCheck": true
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "shared/**/*", "auth-server/**/*"],
   "exclude": ["node_modules", "dist"]
 }
