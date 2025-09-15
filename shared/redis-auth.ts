@@ -7,13 +7,14 @@ import { logger } from "../src/utils/logger.js";
 
 /**
  * Redis key prefixes for different data types
+ * All auth-related keys use "auth:" prefix to avoid collision with MCP session keys
  */
 export const REDIS_KEY_PREFIXES = {
-  CLIENT_REGISTRATION: "client:",
-  PENDING_AUTHORIZATION: "pending:",
-  MCP_AUTHORIZATION: "mcp:",
-  TOKEN_EXCHANGE: "exch:",
-  REFRESH_TOKEN: "refresh:",
+  CLIENT_REGISTRATION: "auth:client:",
+  PENDING_AUTHORIZATION: "auth:pending:",
+  MCP_AUTHORIZATION: "auth:installation:",  // Changed from "mcp:" to avoid collision
+  TOKEN_EXCHANGE: "auth:exch:",
+  REFRESH_TOKEN: "auth:refresh:",
 } as const;
 
 /**

@@ -520,12 +520,25 @@ The server is designed for horizontal scaling using Redis as the backbone:
 - **Automatic Cleanup**: No explicit cleanup required
 
 #### Redis Key Structure
+
+##### MCP Session Keys
 ```
 session:{sessionId}:owner                    # Session ownership
 mcp:shttp:toserver:{sessionId}              # Client→Server messages
 mcp:shttp:toclient:{sessionId}:{requestId}  # Server→Client responses
 mcp:control:{sessionId}                     # Control messages
 ```
+
+##### OAuth/Auth Keys
+```
+auth:client:{clientId}                      # OAuth client registrations
+auth:pending:{authCode}                     # Pending authorizations
+auth:installation:{accessToken}             # Active MCP installations
+auth:exch:{authCode}                        # Token exchanges
+auth:refresh:{refreshToken}                 # Refresh tokens
+```
+
+Note: The `auth:` prefix ensures complete namespace isolation between auth and MCP functions in both integrated and separate modes.
 
 ### Transport Methods
 
