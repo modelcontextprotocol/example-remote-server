@@ -18,6 +18,7 @@ import {
   saveRefreshToken,
 } from '../services/auth.js';
 import { InvalidTokenError } from '@modelcontextprotocol/sdk/server/auth/errors.js';
+import { logger } from '../utils/logger.js';
 
 /**
  * Implementation of the OAuthRegisteredClientsStore interface using the existing client registration system
@@ -65,6 +66,12 @@ export class EverythingAuthProvider implements OAuthServerProvider {
       codeChallengeMethod: 'S256', // Currently only support S256
       clientId: client.client_id,
       state: params.state,
+    });
+
+    logger.debug('Saved pending authorization', {
+      authorizationCode: authorizationCode.substring(0, 8) + '...',
+      clientId: client.client_id,
+      state: params.state?.substring(0, 8) + '...'
     });
 
     // TODO: should we use a different key, other than the authorization code, to store the pending authorization?

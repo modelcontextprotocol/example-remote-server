@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { generateMcpTokens, readPendingAuthorization, saveMcpInstallation, saveRefreshToken, saveTokenExchange } from "../services/auth.js";
 import { McpInstallation } from "../types.js";
+import { logger } from "../utils/logger.js";
 
 // this module has a fake upstream auth server that returns a fake auth code, it also allows you to authorize or fail 
 // authorization, to test the different flows
@@ -266,6 +267,12 @@ export async function handleFakeAuthorizeRedirect(req: Request, res: Response) {
     userId, // User ID from the authorization flow
   } = req.query;
 
+  logger.debug('Fake auth redirect received', {
+    mcpAuthorizationCode: typeof mcpAuthorizationCode === 'string' ? mcpAuthorizationCode.substring(0, 8) + '...' : mcpAuthorizationCode,
+    upstreamAuthorizationCode: typeof upstreamAuthorizationCode === 'string' ? upstreamAuthorizationCode.substring(0, 8) + '...' : upstreamAuthorizationCode,
+    userId
+  });
+
   // This is where you'd exchange the upstreamAuthorizationCode for access/refresh tokens
   // In this case, we're just going to fake it
   const upstreamTokens = await fakeUpstreamTokenExchange(upstreamAuthorizationCode as string);
@@ -276,12 +283,21 @@ export async function handleFakeAuthorizeRedirect(req: Request, res: Response) {
   }
 
   const pendingAuth = await readPendingAuthorization(mcpAuthorizationCode);
+  logger.debug('Reading pending authorization', {
+    mcpAuthorizationCode: mcpAuthorizationCode.substring(0, 8) + '...',
+    found: !!pendingAuth
+  });
+
   if (!pendingAuth) {
     throw new Error("No matching authorization found");
   }
 
-
+  logger.debug('Generating MCP tokens');
   const mcpTokens = generateMcpTokens();
+  logger.debug('MCP tokens generated', {
+    hasAccessToken: !!mcpTokens.access_token,
+    hasRefreshToken: !!mcpTokens.refresh_token
+  });
 
   const mcpInstallation: McpInstallation = {
     fakeUpstreamInstallation: {
@@ -294,25 +310,37 @@ export async function handleFakeAuthorizeRedirect(req: Request, res: Response) {
     userId: (userId as string) || 'anonymous-user', // Include user ID from auth flow
   }
 
+  logger.debug('Saving MCP installation');
   // Store the upstream authorization data
   await saveMcpInstallation(mcpTokens.access_token, mcpInstallation);
+  logger.debug('MCP installation saved');
 
   // Store the refresh token -> access token mapping
   if (mcpTokens.refresh_token) {
+    logger.debug('Saving refresh token mapping');
     await saveRefreshToken(mcpTokens.refresh_token, mcpTokens.access_token);
+    logger.debug('Refresh token mapping saved');
   }
 
+  logger.debug('Saving token exchange data');
   // Store the token exchange data
   await saveTokenExchange(mcpAuthorizationCode, {
     mcpAccessToken: mcpTokens.access_token,
     alreadyUsed: false,
   });
+  logger.debug('Token exchange data saved');
 
   // Redirect back to the original application with the authorization code and state
   const redirectUrl = pendingAuth.state ?
     `${pendingAuth.redirectUri}?code=${mcpAuthorizationCode}&state=${pendingAuth.state}` :
     `${pendingAuth.redirectUri}?code=${mcpAuthorizationCode}`;
+
+  logger.debug('Redirecting to callback', {
+    redirectUrl,
+    hasState: !!pendingAuth.state
+  });
   res.redirect(redirectUrl);
+  logger.debug('Redirect completed');
 };
 
 function fakeUpstreamTokenExchange(
