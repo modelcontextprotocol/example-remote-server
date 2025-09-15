@@ -227,12 +227,9 @@ if (AUTH_MODE === 'integrated') {
     }
   }
   
-  // Serve resource metadata only (not auth endpoints)
-  app.use(mcpAuthMetadataRouter({
-    oauthMetadata: authMetadata,
-    resourceServerUrl: new URL(BASE_URI),
-    resourceName: "MCP Everything Server"
-  }));
+  // In separate mode, we don't serve OAuth metadata endpoints
+  // The auth server handles all OAuth metadata
+  // We only need to configure the bearer auth middleware
   
   // Configure bearer auth with external verifier
   const externalVerifier = new ExternalAuthVerifier(AUTH_SERVER_URL);
