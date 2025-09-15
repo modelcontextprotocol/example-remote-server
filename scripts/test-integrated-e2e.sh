@@ -5,6 +5,12 @@ echo "=================================================="
 echo "End-to-End Test - Integrated Mode"
 echo "=================================================="
 
+# Kill any existing servers
+echo "🛑 Cleaning up existing servers..."
+pkill -f "node.*dist/src/index" || true
+pkill -f "tsx watch.*src/index" || true
+sleep 2
+
 # Use environment variables if available, otherwise defaults
 MCP_SERVER="${BASE_URI:-http://localhost:3232}"
 USER_ID="e2e-test-$(date +%s)"
@@ -33,34 +39,68 @@ if [ "${AUTH_MODE:-integrated}" != "integrated" ]; then
     echo "   Or use: ./scripts/test-separate-e2e.sh"
 fi
 
+# Start MCP server in integrated mode
+echo "🚀 Starting MCP server in integrated mode..."
+AUTH_MODE=integrated npm start &
+MCP_PID=$!
+sleep 5
+
 # Check MCP server
 if ! curl -s -f "$MCP_SERVER/" > /dev/null; then
-    echo "❌ MCP server not running at $MCP_SERVER"
-    echo "   Required setup:"
-    echo "   1. Start Redis: docker compose up -d"
-    echo "   2. Start MCP server: npm run dev:integrated"
-    echo "   3. Or set up environment:"
-    echo "      cp .env.integrated .env && npm run dev"
+    echo "❌ MCP server failed to start at $MCP_SERVER"
+    kill $MCP_PID 2>/dev/null || true
     exit 1
 fi
-echo "✅ MCP server is running"
+echo "✅ MCP server is running (PID: $MCP_PID)"
+
+# Clean up on exit
+trap "kill $MCP_PID 2>/dev/null || true" EXIT
 
 echo "🔐 PHASE 1: OAuth Authentication"
 echo "================================"
 
-# OAuth flow (abbreviated for clarity)
+# OAuth Step 1: Client Registration
+# Register a new OAuth client application with the authorization server
+# This would typically be done once during app setup, not for each user
 CLIENT_RESPONSE=$(curl -s -X POST -H "Content-Type: application/json" -d '{"client_name":"e2e-fixed","redirect_uris":["http://localhost:3000/callback"]}' "$MCP_SERVER/register")
 CLIENT_ID=$(echo "$CLIENT_RESPONSE" | jq -r .client_id)
 CLIENT_SECRET=$(echo "$CLIENT_RESPONSE" | jq -r .client_secret)
 
+# OAuth Step 2: Generate PKCE (Proof Key for Code Exchange) parameters
+# PKCE adds security to the OAuth flow by preventing authorization code interception attacks
 CODE_VERIFIER=$(openssl rand -base64 32 | tr -d "=+/" | cut -c1-43)
 CODE_CHALLENGE=$(echo -n "$CODE_VERIFIER" | openssl dgst -binary -sha256 | base64 | tr "+/" "-_" | tr -d "=")
 
-AUTH_PAGE=$(curl -s "$MCP_SERVER/authorize?response_type=code&client_id=$CLIENT_ID&redirect_uri=http://localhost:3000/callback&code_challenge=$CODE_CHALLENGE&code_challenge_method=S256&state=e2e-state")
+# OAuth Step 3: Authorization Request
+# Direct the user to the authorization server's /authorize endpoint
+# Include state parameter for CSRF protection
+STATE_PARAM="e2e-state-$(date +%s)"
+
+AUTH_PAGE=$(curl -s "$MCP_SERVER/authorize?response_type=code&client_id=$CLIENT_ID&redirect_uri=http://localhost:3000/callback&code_challenge=$CODE_CHALLENGE&code_challenge_method=S256&state=$STATE_PARAM")
+# Extract the authorization code from the HTML response (normally would be in redirect URL)
 AUTH_CODE=$(echo "$AUTH_PAGE" | grep -o 'state=[^"&]*' | cut -d= -f2)
 
-curl -s "$MCP_SERVER/fakeupstreamauth/callback?state=$AUTH_CODE&code=fakecode&userId=$USER_ID" > /dev/null
+# OAuth Step 4: User Authentication & Authorization
+# In a real flow, the user would authenticate with the auth server here
+# For testing, we simulate this with the fake upstream auth endpoint
+CALLBACK_RESPONSE=$(curl -s -i "$MCP_SERVER/fakeupstreamauth/callback?state=$AUTH_CODE&code=fakecode&userId=$USER_ID")
 
+# OAuth Step 5: Authorization Code Redirect
+# Verify the auth server redirects back to our redirect_uri with the code and state
+# The state parameter MUST match what we sent to prevent CSRF attacks
+LOCATION_HEADER=$(echo "$CALLBACK_RESPONSE" | grep -i "^location:" | tr -d '\r')
+if echo "$LOCATION_HEADER" | grep -q "state=$STATE_PARAM"; then
+    echo "✅ State parameter verified in callback"
+else
+    echo "❌ State parameter mismatch or missing in callback"
+    echo "   Expected state: $STATE_PARAM"
+    echo "   Location header: $LOCATION_HEADER"
+    exit 1
+fi
+
+# OAuth Step 6: Token Exchange
+# Exchange the authorization code for access and refresh tokens
+# Include the PKCE code_verifier to prove we initiated the flow
 TOKEN_RESPONSE=$(curl -s -X POST -H "Content-Type: application/x-www-form-urlencoded" -d "grant_type=authorization_code&client_id=$CLIENT_ID&client_secret=$CLIENT_SECRET&code=$AUTH_CODE&redirect_uri=http://localhost:3000/callback&code_verifier=$CODE_VERIFIER" "$MCP_SERVER/token")
 
 ACCESS_TOKEN=$(echo "$TOKEN_RESPONSE" | jq -r .access_token)

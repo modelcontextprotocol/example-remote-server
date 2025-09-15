@@ -8,6 +8,14 @@ echo "This script tests the complete OAuth flow and MCP features"
 echo "using separate auth server and MCP server."
 echo ""
 
+# Kill any existing servers
+echo "🛑 Cleaning up existing servers..."
+pkill -f "node.*dist/src/index" || true
+pkill -f "node.*dist/auth-server/index" || true
+pkill -f "tsx watch.*src/index" || true
+pkill -f "tsx watch.*auth-server/index" || true
+sleep 2
+
 # Use environment variables if available, otherwise defaults
 AUTH_SERVER="${AUTH_SERVER_URL:-http://localhost:3001}"
 MCP_SERVER="${BASE_URI:-http://localhost:3232}"
@@ -38,34 +46,45 @@ if [ "${AUTH_MODE}" = "integrated" ]; then
     echo "   Or use: ./scripts/test-integrated-e2e-fixed.sh"
 fi
 
+# Start auth server
+echo "🚀 Starting auth server..."
+npm run start:auth-server &
+AUTH_PID=$!
+sleep 5
+
 # Check auth server
 if ! curl -s -f "$AUTH_SERVER/health" > /dev/null; then
-    echo "❌ Auth server not running at $AUTH_SERVER"
-    echo "   Required setup:"
-    echo "   1. Start Redis: docker compose up -d" 
-    echo "   2. Start both servers: npm run dev:with-separate-auth"
-    echo "   3. Or start separately:"
-    echo "      Terminal 1: npm run dev:auth-server"
-    echo "      Terminal 2: AUTH_MODE=separate npm run dev"
-    echo "   4. Or set up environment:"
-    echo "      cp .env.separate .env && npm run dev:with-separate-auth"
+    echo "❌ Auth server failed to start at $AUTH_SERVER"
+    kill $AUTH_PID 2>/dev/null || true
     exit 1
 fi
-echo "✅ Auth server is running"
+echo "✅ Auth server is running (PID: $AUTH_PID)"
+
+# Start MCP server in separate mode
+echo "🚀 Starting MCP server in separate mode..."
+AUTH_MODE=separate npm start &
+MCP_PID=$!
+sleep 5
 
 # Check MCP server
 if ! curl -s -f "$MCP_SERVER/" > /dev/null; then
-    echo "❌ MCP server not running at $MCP_SERVER"
-    echo "   See auth server setup instructions above"
+    echo "❌ MCP server failed to start at $MCP_SERVER"
+    kill $AUTH_PID 2>/dev/null || true
+    kill $MCP_PID 2>/dev/null || true
     exit 1
 fi
-echo "✅ MCP server is running"
+echo "✅ MCP server is running (PID: $MCP_PID)"
+
+# Clean up on exit
+trap "kill $AUTH_PID $MCP_PID 2>/dev/null || true" EXIT
 
 echo ""
 echo "🔐 PHASE 1: OAuth Authentication (with Auth Server)"
 echo "================================================="
 
-# Step 1: Register OAuth client with AUTH SERVER
+# OAuth Step 1: Client Registration
+# Register a new OAuth client application with the authorization server
+# This would typically be done once during app setup, not for each user
 echo "📝 Step 1: Register OAuth client with auth server"
 CLIENT_RESPONSE=$(curl -s -X POST -H "Content-Type: application/json" \
   -d "{\"client_name\":\"e2e-separate-client\",\"redirect_uris\":[\"http://localhost:3000/callback\"]}" \
@@ -75,19 +94,24 @@ CLIENT_ID=$(echo "$CLIENT_RESPONSE" | jq -r .client_id)
 CLIENT_SECRET=$(echo "$CLIENT_RESPONSE" | jq -r .client_secret)
 echo "   Client ID: $CLIENT_ID"
 
-# Step 2: Generate PKCE
+# OAuth Step 2: Generate PKCE (Proof Key for Code Exchange) parameters
+# PKCE adds security to the OAuth flow by preventing authorization code interception attacks
 echo ""
 echo "🔐 Step 2: Generate PKCE challenge"
 CODE_VERIFIER=$(openssl rand -base64 32 | tr -d "=+/" | cut -c1-43)
 CODE_CHALLENGE=$(echo -n "$CODE_VERIFIER" | openssl dgst -binary -sha256 | base64 | tr "+/" "-_" | tr -d "=")
 echo "   Code verifier generated"
 
-# Step 3: Get authorization code from AUTH SERVER
+# OAuth Step 3: Authorization Request
+# Direct the user to the authorization server's /authorize endpoint
+# Include state parameter for CSRF protection
 echo ""
 echo "🎫 Step 3: Get authorization code from auth server"
-AUTH_URL="$AUTH_SERVER/authorize?response_type=code&client_id=$CLIENT_ID&redirect_uri=http://localhost:3000/callback&code_challenge=$CODE_CHALLENGE&code_challenge_method=S256&state=separate-test"
+STATE_PARAM="separate-test-$(date +%s)"
+AUTH_URL="$AUTH_SERVER/authorize?response_type=code&client_id=$CLIENT_ID&redirect_uri=http://localhost:3000/callback&code_challenge=$CODE_CHALLENGE&code_challenge_method=S256&state=$STATE_PARAM"
 
 AUTH_PAGE=$(curl -s "$AUTH_URL")
+# Extract the authorization code from the HTML response (normally would be in redirect URL)
 AUTH_CODE=$(echo "$AUTH_PAGE" | grep -o 'state=[^"&]*' | cut -d= -f2 | head -1)
 
 if [ -z "$AUTH_CODE" ]; then
@@ -96,14 +120,31 @@ if [ -z "$AUTH_CODE" ]; then
 fi
 echo "   Auth Code: ${AUTH_CODE:0:20}..."
 
-# Step 4: Complete fake upstream auth with AUTH SERVER
+# OAuth Step 4: User Authentication & Authorization
+# In a real flow, the user would authenticate with the auth server here
+# For testing, we simulate this with the fake upstream auth endpoint
 echo ""
 echo "🔄 Step 4: Complete fake upstream auth with auth server"
 CALLBACK_URL="$AUTH_SERVER/fakeupstreamauth/callback?state=$AUTH_CODE&code=fakecode&userId=$USER_ID"
-curl -s -L "$CALLBACK_URL" > /dev/null
+CALLBACK_RESPONSE=$(curl -s -i "$CALLBACK_URL")
+
+# OAuth Step 5: Authorization Code Redirect
+# Verify the auth server redirects back to our redirect_uri with the code and state
+# The state parameter MUST match what we sent to prevent CSRF attacks
+LOCATION_HEADER=$(echo "$CALLBACK_RESPONSE" | grep -i "^location:" | tr -d '\r')
+if echo "$LOCATION_HEADER" | grep -q "state=$STATE_PARAM"; then
+    echo "   ✅ State parameter verified in callback"
+else
+    echo "   ❌ State parameter mismatch or missing in callback"
+    echo "   Expected state: $STATE_PARAM"
+    echo "   Location header: $LOCATION_HEADER"
+    exit 1
+fi
 echo "   Fake upstream auth completed"
 
-# Step 5: Exchange for tokens with AUTH SERVER
+# OAuth Step 6: Token Exchange
+# Exchange the authorization code for access and refresh tokens
+# Include the PKCE code_verifier to prove we initiated the flow
 echo ""
 echo "🎟️  Step 5: Exchange code for access token with auth server"
 TOKEN_RESPONSE=$(curl -s -X POST -H "Content-Type: application/x-www-form-urlencoded" \
