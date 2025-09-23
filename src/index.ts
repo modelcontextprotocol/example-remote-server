@@ -1,5 +1,5 @@
 import { BearerAuthMiddlewareOptions, requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
-import { AuthRouterOptions, getOAuthProtectedResourceMetadataUrl, mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
+import { AuthRouterOptions, getOAuthProtectedResourceMetadataUrl, mcpAuthRouter, mcpAuthMetadataRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
 import express from "express";
@@ -227,19 +227,15 @@ if (AUTH_MODE === 'integrated') {
     }
   }
   
-  // In separate mode, we serve minimal OAuth metadata that points to the auth server
-  // This allows OAuth clients to discover the authorization endpoints
-
-  // Serve OAuth protected resource metadata endpoint
-  app.get('/.well-known/oauth-protected-resource', (req, res) => {
-    res.json({
-      resource: BASE_URI,
-      authorization_server: AUTH_SERVER_URL,
-      bearer_methods_supported: ['header'],
-      resource_documentation: `${BASE_URI}/docs`,
-      resource_signing_alg_values_supported: ['HS256']
-    });
-  });
+  // BACKWARDS COMPATIBILITY: We serve OAuth metadata from the MCP server even in separate mode
+  // This is technically redundant since the auth server handles all OAuth operations,
+  // but some clients may expect to find .well-known/oauth-authorization-server on the
+  // resource server itself. The metadata points to the external auth server endpoints.
+  app.use(mcpAuthMetadataRouter({
+    oauthMetadata: authMetadata,
+    resourceServerUrl: new URL(BASE_URI),
+    resourceName: "MCP Everything Server"
+  }));
 
   // Configure bearer auth with external verifier
   const externalVerifier = new ExternalAuthVerifier(AUTH_SERVER_URL);
