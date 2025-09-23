@@ -3,6 +3,7 @@ import { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 import { InvalidTokenError } from '@modelcontextprotocol/sdk/server/auth/errors.js';
 import { TokenIntrospectionResponse } from '../../shared/types.js';
 import { logger } from '../utils/logger.js';
+import { BASE_URI } from '../config.js';
 
 /**
  * Token verifier that validates tokens with an external authorization server.
@@ -11,15 +12,20 @@ import { logger } from '../utils/logger.js';
 export class ExternalAuthVerifier implements OAuthTokenVerifier {
   // Token validation cache: token -> { authInfo, expiresAt }
   private tokenCache = new Map<string, { authInfo: AuthInfo; expiresAt: number }>();
-  
+
   // Default cache TTL: 60 seconds (conservative for security)
   private readonly defaultCacheTTL = 60 * 1000; // milliseconds
-  
+
+  // The canonical URI of this MCP server for audience validation
+  private readonly canonicalUri: string;
+
   /**
    * Creates a new external auth verifier.
    * @param authServerUrl Base URL of the external authorization server
+   * @param canonicalUri Optional canonical URI for audience validation (defaults to BASE_URI)
    */
-  constructor(private authServerUrl: string) {
+  constructor(private authServerUrl: string, canonicalUri?: string) {
+    this.canonicalUri = canonicalUri || BASE_URI;
     // Periodically clean up expired cache entries
     setInterval(() => this.cleanupCache(), 60 * 1000); // Every minute
   }
@@ -85,7 +91,37 @@ export class ExternalAuthVerifier implements OAuthTokenVerifier {
       if (data.exp && data.exp < Date.now() / 1000) {
         throw new InvalidTokenError('Token has expired');
       }
-      
+
+      // Validate audience (aud) claim to ensure token is for this MCP server
+      // According to MCP spec, servers MUST validate that tokens were issued specifically for them
+      if (data.aud) {
+        const audiences = Array.isArray(data.aud) ? data.aud : [data.aud];
+        if (!audiences.includes(this.canonicalUri)) {
+          logger.error('Token audience mismatch', undefined, {
+            expectedAudience: this.canonicalUri,
+            actualAudience: data.aud,
+          });
+          throw new InvalidTokenError('Token was not issued for this resource server');
+        }
+      } else {
+        // Log warning if no audience claim present (permissive for backwards compatibility)
+        logger.info('Token introspection response missing audience claim', {
+          warning: true,
+          tokenSub: data.sub,
+          clientId: data.client_id,
+        });
+      }
+
+      // Validate token is not used before its 'not before' time (nbf) if present
+      if (data.nbf && data.nbf > Date.now() / 1000) {
+        throw new InvalidTokenError('Token is not yet valid (nbf)');
+      }
+
+      // Validate token was issued in the past (iat) if present
+      if (data.iat && data.iat > Date.now() / 1000 + 60) { // Allow 60s clock skew
+        throw new InvalidTokenError('Token issued in the future (iat)');
+      }
+
       // Extract user ID from standard 'sub' claim or custom 'userId' field
       const userId = data.sub || data.userId;
       if (!userId) {
