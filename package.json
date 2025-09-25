@@ -15,7 +15,7 @@
     "dev:with-separate-auth": "concurrently -n \"AUTH,MCP\" -c \"yellow,cyan\" \"npm run dev:auth-server\" \"npm run dev:separate\"",
     "build": "tsc && npm run copy-static",
     "copy-static": "mkdir -p dist/src/static && cp -r src/static/* dist/src/static/",
-    "lint": "eslint src/ auth-server/",
+    "lint": "eslint src/ auth-server/ shared/",
     "test": "NODE_OPTIONS=--experimental-vm-modules jest",
     "test:integrated": "AUTH_MODE=integrated npm test",
     "test:separate": "AUTH_MODE=separate npm test",

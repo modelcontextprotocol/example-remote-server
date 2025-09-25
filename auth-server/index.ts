@@ -6,7 +6,7 @@ import { EverythingAuthProvider } from '../src/auth/provider.js';
 import { handleFakeAuthorize, handleFakeAuthorizeRedirect } from '../src/handlers/fakeauth.js';
 import { redisClient } from '../src/redis.js';
 import { logger } from '../src/utils/logger.js';
-import { AUTH_SERVER_PORT, AUTH_SERVER_URL } from '../src/config.js';
+import { AUTH_SERVER_PORT, AUTH_SERVER_URL, BASE_URI } from '../src/config.js';
 
 const app = express();
 
@@ -101,7 +101,7 @@ app.post('/introspect', introspectRateLimit, express.urlencoded({ extended: fals
       userId: authInfo.extra?.userId, // Custom field for our implementation
       username: authInfo.extra?.username,
       iss: AUTH_SERVER_URL,
-      aud: authInfo.clientId,
+      aud: BASE_URI, // The resource server URL this token is intended for
       token_type: 'Bearer'
     });
     
