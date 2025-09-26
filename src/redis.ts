@@ -1,5 +1,6 @@
 import { createClient, SetOptions } from "@redis/client";
 import { logger } from "./utils/logger.js";
+import { REDIS_URL } from "./config.js";
 
 /**
  * Describes the Redis primitives we use in this application, to be able to mock
@@ -37,7 +38,7 @@ export interface RedisClient {
 
 export class RedisClientImpl implements RedisClient {
   private redis = createClient({
-    url: process.env.REDIS_URL || "redis://localhost:6379",
+    url: REDIS_URL,
     password: process.env.REDIS_PASSWORD,
     socket: {
       tls: process.env.REDIS_TLS === "1",
@@ -97,7 +98,7 @@ export class RedisClientImpl implements RedisClient {
   }
 
   get options() {
-    return { url: process.env.REDIS_URL || "redis://localhost:6379" };
+    return { url: REDIS_URL };
   }
 
   async createSubscription(

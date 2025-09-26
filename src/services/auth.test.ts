@@ -124,8 +124,8 @@ describe("auth utils", () => {
       // instead of using exchangeToken which changes the value
       await saveTokenExchange(authCode, tokenExchange);
       
-      // Get the key used by saveTokenExchange
-      const key = "exch:" + crypto.createHash("sha256").update(authCode).digest("hex");
+      // Get the key used by saveTokenExchange (now with auth: prefix)
+      const key = "auth:exch:" + crypto.createHash("sha256").update(authCode).digest("hex");
       
       // Get the encrypted data
       const encryptedData = await mockRedis.get(key);
@@ -266,8 +266,8 @@ describe("auth utils", () => {
 
       await revokeMcpInstallation(accessToken);
       
-      // Should have called getDel with the correct key
-      expect(getDel).toHaveBeenCalledWith(expect.stringContaining("mcp:"));
+      // Should have called getDel with the correct key (now auth:installation:)
+      expect(getDel).toHaveBeenCalledWith(expect.stringContaining("auth:installation:"));
       
     });
     

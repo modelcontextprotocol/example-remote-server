@@ -127,12 +127,24 @@ Redis stores session ownership information using a structured key system.
 
 ### Redis Key Structure
 
+#### MCP Session Keys (MCP Server)
 ```
 session:{sessionId}:owner → userId                    # Session ownership
 mcp:shttp:toserver:{sessionId} → [pub/sub channel]   # Client→Server messages (also indicates liveness)
 mcp:shttp:toclient:{sessionId}:{requestId} → [pub/sub channel] # Server→Client responses
 mcp:control:{sessionId}   → [pub/sub channel]        # Control messages
 ```
+
+#### Auth Keys (Auth Server)
+```
+auth:client:{clientId} → client registration          # OAuth client registrations
+auth:pending:{authCode} → pending authorization       # Pending auth (10 min TTL)
+auth:installation:{accessToken} → MCP installation    # Active sessions (7 days TTL)
+auth:exch:{authCode} → token exchange                 # Token exchange (10 min TTL)
+auth:refresh:{refreshToken} → access token            # Refresh tokens (7 days TTL)
+```
+
+Note: The `auth:` prefix ensures complete isolation from MCP session keys, allowing both integrated and separate modes to work consistently.
 
 ### Redis Operations
 

@@ -3,15 +3,24 @@
   "version": "0.1.0",
   "description": "Example MCP Server",
   "type": "module",
-  "main": "dist/index.js",
+  "main": "dist/src/index.js",
   "scripts": {
-    "start": "node dist/index.js",
+    "start": "node dist/src/index.js",
+    "start:auth-server": "node dist/auth-server/index.js",
     "dev": "tsx watch --inspect src/index.ts",
     "dev:break": "tsx --inspect-brk watch src/index.ts",
+    "dev:integrated": "AUTH_MODE=integrated npm run dev",
+    "dev:separate": "AUTH_MODE=separate AUTH_SERVER_URL=http://localhost:3001 npm run dev",
+    "dev:auth-server": "AUTH_SERVER_PORT=3001 tsx watch --inspect auth-server/index.ts",
+    "dev:with-separate-auth": "concurrently -n \"AUTH,MCP\" -c \"yellow,cyan\" \"npm run dev:auth-server\" \"npm run dev:separate\"",
     "build": "tsc && npm run copy-static",
-    "copy-static": "mkdir -p dist/static && cp -r src/static/* dist/static/",
-    "lint": "eslint src/",
-    "test": "NODE_OPTIONS=--experimental-vm-modules jest"
+    "copy-static": "mkdir -p dist/src/static && cp -r src/static/* dist/src/static/",
+    "lint": "eslint src/ auth-server/ shared/",
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest",
+    "test:integrated": "AUTH_MODE=integrated npm test",
+    "test:separate": "AUTH_MODE=separate npm test",
+    "test:e2e:integrated": "./scripts/test-integrated-e2e.sh",
+    "test:e2e:separate": "./scripts/test-separate-e2e.sh"
   },
   "devDependencies": {
     "@eslint/js": "^9.15.0",
@@ -20,6 +29,7 @@
     "@types/express": "^5.0.0",
     "@types/jest": "^29.5.14",
     "@types/node": "^22.10.0",
+    "concurrently": "^8.2.0",
     "jest": "^29.7.0",
     "ts-jest": "^29.2.5",
     "tsx": "^4.19.2",
@@ -32,6 +42,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "express-rate-limit": "^8.0.1",
     "raw-body": "^3.0.0"
   },
   "overrides": {
