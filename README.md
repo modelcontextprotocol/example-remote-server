@@ -185,7 +185,7 @@ cp .env.separate .env
 The Everything Server supports two authentication modes to demonstrate different MCP deployment patterns:
 
 ### Integrated Mode (Default)
-The MCP server acts as its own OAuth 2.0 authorization server. This is simpler to deploy and suitable for standalone MCP servers.
+The MCP server acts as its own OAuth 2.0 authorization server. This is simpler to deploy and provides a demo-grade implementation of authorization by a standalone MCP server.
 
 ```bash
 npm run dev:integrated
