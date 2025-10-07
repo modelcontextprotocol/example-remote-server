@@ -14,7 +14,7 @@ console.log('=====================================');
 console.log('MCP Demonstration Authorization Server');
 console.log('=====================================');
 console.log('This standalone server demonstrates OAuth 2.0');
-console.log('authorization separate from the MCP resource server');
+console.log('authorization for the MCP resource server');
 console.log('');
 console.log('This is for demonstration purposes only.');
 console.log('In production, you would use a real OAuth provider');
