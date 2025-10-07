@@ -3,10 +3,38 @@ import { generateMcpTokens, readPendingAuthorization, saveMcpInstallation, saveR
 import { McpInstallation } from "../types.js";
 import { logger } from "../utils/logger.js";
 
-// Mock upstream identity provider - simulates Google OAuth, corporate SAML, or other external identity providers
-// that OAuth servers can delegate user authentication to (configurable in Auth0/Okta).
-// In production, the OAuth server would redirect to actual external IDPs.
+/**
+ * ============================================================================
+ * MOCK UPSTREAM IDENTITY PROVIDER - FOR DEMONSTRATION ONLY
+ * ============================================================================
+ *
+ * This file simulates what happens when an OAuth server delegates user
+ * authentication to an external identity provider. In production, this would be:
+ *
+ * - Google OAuth (accounts.google.com)
+ * - GitHub OAuth (github.com/login)
+ * - Corporate SSO (SAML, LDAP, Active Directory)
+ * - Auth0/Okta user database
+ *
+ * The mock implementation:
+ * - Shows a user selection UI
+ * - Generates random user IDs for testing
+ * - Simulates the redirect flow back to the OAuth server
+ *
+ * In production, users would see their actual identity provider's login page
+ * (Google's login, GitHub's login, corporate SSO portal, etc.)
+ *
+ * ============================================================================
+ */
 
+/**
+ * Mock authorization endpoint - simulates external IDP login page
+ * In production, this would be replaced by redirecting to:
+ * - https://accounts.google.com/oauth/authorize (Google)
+ * - https://github.com/login/oauth/authorize (GitHub)
+ * - https://login.microsoftonline.com (Azure AD)
+ * - Your corporate SSO login page
+ */
 export async function handleMockUpstreamAuthorize(req: Request, res: Response) {
   // get the redirect_uri and state from the query params
   const { redirect_uri, state } = req.query;
@@ -256,7 +284,7 @@ export async function handleMockUpstreamAuthorize(req: Request, res: Response) {
 }
 
 
-// Callback from the mock upstream identity provider after user authentication
+// This is the callback URL that the upstream auth server will redirect to after authorization
 export async function handleMockUpstreamCallback(req: Request, res: Response) {
   const {
     // The state returned from the upstream auth server is actually the authorization code
@@ -271,7 +299,8 @@ export async function handleMockUpstreamCallback(req: Request, res: Response) {
     userId
   });
 
-  // Exchange the upstream authorization code for tokens
+  // This is where you'd exchange the upstreamAuthorizationCode for access/refresh tokens
+  // In this case, we're just going to fake it
   const upstreamTokens = await mockUpstreamTokenExchange(upstreamAuthorizationCode as string);
 
   // Validate that it's a string

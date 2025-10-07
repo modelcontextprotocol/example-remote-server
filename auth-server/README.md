@@ -118,6 +118,7 @@ This server stores in Redis:
 
 ## Related Documentation
 
-- [Main README](../../README.md) - Complete project documentation
+- [Main README](../README.md) - Complete project documentation
 - [MCP Server README](../mcp-server/README.md) - How MCP server uses these tokens
-- [External OAuth Overview](../README.md) - Architecture explanation
+- [OAuth Patterns](../docs/oauth-patterns.md) - OAuth architecture patterns
+- [OAuth Flow](../docs/oauth-flow.md) - Detailed OAuth flow analysis

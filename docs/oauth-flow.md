@@ -1,10 +1,10 @@
 # OAuth 2.0 + PKCE Flow Analysis
 
-This document details the complete OAuth 2.0 authorization code flow with PKCE as implemented in this reference server, including how it differs between integrated and separate modes.
+This document details the complete OAuth 2.0 authorization code flow with PKCE as implemented in this reference server with separate authorization and resource servers.
 
 ## Flow Overview
 
-The server implements OAuth 2.1 with PKCE (Proof Key for Code Exchange) for secure authorization. Here's how each step maps to data storage, expiry, and mode-specific behavior:
+The server implements OAuth 2.1 with PKCE (Proof Key for Code Exchange) for secure authorization. The architecture separates the authorization server (port 3001) from the MCP resource server (port 3232).
 
 ## 1. Client Registration
 
@@ -19,8 +19,7 @@ Auth Server → App: {"client_id": "XYZ", "client_secret": "ABC", ...}
 **Storage**:
 - Redis key: `auth:client:{clientId}`
 - Expiry: 30 days (long-lived app credentials)
-
-**Mode differences**: None - identical in both modes.
+- Server: Auth Server (port 3001)
 
 ---
 
@@ -44,10 +43,7 @@ Auth Server: Saves pending authorization, shows authorization page
 - Redis key: `auth:pending:{authCode}`
 - Expiry: 10 minutes (short-lived temporary state)
 - Data: redirect_uri, code_challenge, code_challenge_method, client_id, state
-
-**Mode differences**:
-- **Embedded OAuth**: OAuth server runs on MCP server (port 3232)
-- **External OAuth**: OAuth server runs independently (port 3001)
+- Server: Auth Server (port 3001)
 
 ---
 
@@ -55,23 +51,19 @@ Auth Server: Saves pending authorization, shows authorization page
 
 **Purpose**: Authenticate the user and obtain consent.
 
-**Flow** (identical in both modes):
+**Flow**:
 ```
-OAuth Server → User: Shows auth page with "Continue to Authentication" button
-User → OAuth Server: Clicks button
-OAuth Server → Upstream IDP: Redirects to /mock-upstream-idp/authorize
+Auth Server → User: Shows auth page with "Continue to Authentication" button
+User → Auth Server: Clicks button
+Auth Server → Upstream IDP: Redirects to /mock-upstream-idp/authorize
 Upstream IDP → User: Shows user selection UI
 User → Upstream IDP: Selects/creates user ID
-Upstream IDP → OAuth Server: Redirects to /mock-upstream-idp/callback?userId=X
-OAuth Server: Validates user, issues authorization code
-OAuth Server → App: Redirects to app's redirect_uri with code
+Upstream IDP → Auth Server: Redirects to /mock-upstream-idp/callback?userId=X
+Auth Server: Validates user, issues authorization code
+Auth Server → App: Redirects to app's redirect_uri with code
 ```
 
-**Mode differences**:
-- **Embedded OAuth**: OAuth Server runs on MCP server (port 3232)
-- **External OAuth**: OAuth Server runs independently (port 3001)
-
-The flow itself is identical. Both modes delegate user authentication to an upstream IDP (simulated by `/mock-upstream-idp/*` endpoints, which represent corporate SSO or social login in production).
+**Note**: In production, the upstream IDP would be an external provider (Auth0, Okta, Google, GitHub, etc.). The `/mock-upstream-idp/*` endpoints simulate this for demonstration purposes.
 
 ---
 
@@ -109,10 +101,7 @@ Auth Server → App:
 - `auth:installation:{accessToken}` - Active MCP installation
 - `auth:refresh:{refreshToken}` - Refresh token mapping
 - Expiry: 10 minutes for exchange record, 7 days for installation
-
-**Mode differences**: None in the exchange itself. The endpoint location differs:
-- **Embedded OAuth**: `http://localhost:3232/token`
-- **External OAuth**: `http://localhost:3001/token`
+- Server: Auth Server (port 3001)
 
 ---
 
@@ -127,29 +116,28 @@ App → MCP Server: POST /mcp
   Mcp-Session-Id: <session_id>
   {MCP request}
 
-MCP Server: Validates token → Serves MCP resource
+MCP Server → Auth Server: POST /introspect
+  token=<access_token>
+
+Auth Server → MCP Server:
+  {
+    "active": true,
+    "userId": "...",
+    "exp": ...,
+    "aud": "http://localhost:3232"
+  }
+
+MCP Server: Validates audience, serves MCP resource
 ```
 
-**Token Validation - Embedded OAuth**:
-```
-MCP Server (same process as OAuth server):
-  - Reads auth:installation:{accessToken} from Redis
-  - Validates expiry, scopes
-  - Returns user info directly
-```
+**Token Validation Process**:
+1. MCP Server receives request with bearer token
+2. Calls Auth Server's `/introspect` endpoint (RFC 7662)
+3. Auth Server validates token and returns metadata
+4. MCP Server validates audience matches `BASE_URI`
+5. Request proceeds with authenticated user context
 
-**Token Validation - External OAuth**:
-```
-MCP Server:
-  - Calls POST {AUTH_SERVER_URL}/introspect with token
-  - Auth server validates and returns token info
-  - MCP server validates audience matches BASE_URI
-  - Proceeds with request
-```
-
-**Mode differences**: This is the key architectural difference:
-- **Embedded OAuth**: In-process token validation (fast, direct Redis access)
-- **External OAuth**: Remote token validation via HTTP introspection (adds network hop, follows RFC 7662)
+This separation allows the Auth Server to be replaced with commercial providers (Auth0, Okta) while keeping the MCP server unchanged.
 
 ---
 
@@ -179,8 +167,7 @@ Auth Server → App: {"access_token": "...", ...}
 - Writes: New `auth:installation:{newAccessToken}`
 - Writes: New `auth:refresh:{newRefreshToken}`
 - Expiry: 7 days
-
-**Mode differences**: None - identical flow, just different endpoint locations.
+- Server: Auth Server (port 3001)
 
 ---
 
@@ -205,7 +192,17 @@ PKCE prevents authorization code interception attacks:
 
 This ensures only the client that initiated the flow can exchange the code, even if the code is intercepted.
 
-**Mode differences**: None - PKCE works identically in both modes.
+---
+
+## Architecture Benefits
+
+The separate server architecture provides:
+
+1. **Standards Compliance**: Follows OAuth 2.0 best practices for resource/authorization server separation
+2. **Flexibility**: Auth server can be replaced with Auth0, Okta, or other providers
+3. **Scalability**: Auth and MCP servers can scale independently based on load
+4. **Security**: Token validation via introspection endpoint (RFC 7662)
+5. **Maintainability**: Clear separation of authentication and business logic
 
 ---
 

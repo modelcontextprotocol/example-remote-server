@@ -1,42 +1,29 @@
 {
   "name": "mcp-server-feature-reference",
   "version": "0.1.0",
-  "description": "Feature Reference MCP Server - Examples for Embedded and External OAuth",
+  "description": "Feature Reference MCP Server - Example with External OAuth",
   "private": true,
   "workspaces": [
-    "embedded-oauth",
-    "external-oauth/auth-server",
-    "external-oauth/mcp-server"
+    "auth-server",
+    "mcp-server"
   ],
   "scripts": {
-    "dev:embedded": "npm run dev --workspace=embedded-oauth",
-    "dev:auth-server": "npm run dev --workspace=external-oauth/auth-server",
-    "dev:mcp-server": "npm run dev --workspace=external-oauth/mcp-server",
-    "dev:external": "concurrently -n \"AUTH,MCP\" -c \"yellow,cyan\" \"npm run dev:auth-server\" \"npm run dev:mcp-server\"",
+    "dev:auth-server": "npm run dev --workspace=auth-server",
+    "dev:mcp-server": "npm run dev --workspace=mcp-server",
+    "dev": "concurrently -n \"AUTH,MCP\" -c \"yellow,cyan\" \"npm run dev:auth-server\" \"npm run dev:mcp-server\"",
 
     "build": "npm run build --workspaces --if-present",
-    "build:embedded": "npm run build --workspace=embedded-oauth",
-    "build:external": "npm run build --workspace=external-oauth/auth-server && npm run build --workspace=external-oauth/mcp-server",
 
-    "start:embedded": "npm run start --workspace=embedded-oauth",
-    "start:auth-server": "npm run start --workspace=external-oauth/auth-server",
-    "start:mcp-server": "npm run start --workspace=external-oauth/mcp-server",
-    "start:external": "concurrently -n \"AUTH,MCP\" -c \"yellow,cyan\" \"npm run start:auth-server\" \"npm run start:mcp-server\"",
+    "start:auth-server": "npm run start --workspace=auth-server",
+    "start:mcp-server": "npm run start --workspace=mcp-server",
+    "start": "concurrently -n \"AUTH,MCP\" -c \"yellow,cyan\" \"npm run start:auth-server\" \"npm run start:mcp-server\"",
 
     "test": "npm run test --workspaces --if-present",
-    "test:embedded": "npm run test --workspace=embedded-oauth",
-    "test:external": "npm run test --workspace=external-oauth/auth-server && npm run test --workspace=external-oauth/mcp-server",
-    "test:e2e:embedded": "./scripts/test-embedded-e2e.sh",
-    "test:e2e:external": "./scripts/test-external-e2e.sh",
-    "test:e2e": "npm run test:e2e:embedded && npm run test:e2e:external",
+    "test:e2e": "./scripts/test-e2e.sh",
 
     "lint": "npm run lint --workspaces --if-present",
-    "lint:embedded": "npm run lint --workspace=embedded-oauth",
-    "lint:external": "npm run lint --workspace=external-oauth/auth-server && npm run lint --workspace=external-oauth/mcp-server",
 
-    "typecheck": "npm run typecheck --workspaces --if-present",
-    "typecheck:embedded": "npm run typecheck --workspace=embedded-oauth",
-    "typecheck:external": "npm run typecheck --workspace=external-oauth/auth-server && npm run typecheck --workspace=external-oauth/mcp-server"
+    "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "devDependencies": {
     "concurrently": "^8.2.0"

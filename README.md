@@ -1,35 +1,24 @@
 # MCP Feature Reference Server
 
-_Note: these docs were AI generated based on a claude code transcript, and then edited manually for accuracy_
+A production-ready example of a Model Context Protocol (MCP) server with OAuth 2.0 authentication, demonstrating best practices for secure, scalable MCP deployments.
 
-A comprehensive example implementation of a scalable Model Context Protocol (MCP) server that demonstrates all MCP functionality with full authentication support and horizontal scalability.
+## What is this?
 
-## Overview
+This repository provides a complete implementation of an MCP server that:
+- Shows how to add authentication to MCP servers using OAuth 2.0
+- Demonstrates all MCP protocol features (tools, resources, prompts)
+- Uses a scalable architecture suitable for production deployments
+- Serves as a learning resource and starting template for your own MCP servers
 
-The Feature Reference Server is an open-source reference implementation that showcases:
-- **Complete [MCP Protocol](https://modelcontextprotocol.io/specification) Support**: All MCP features including tools, resources, prompts, sampling, completions, and logging
-- **Multiple [Transport Methods](https://modelcontextprotocol.io/docs/concepts/transports)**: Streamable HTTP (SHTTP) and Server-Sent Events (SSE)
-- **Dual Authentication Modes**: Integrated and separate authorization server support
-- **Horizontal Scalability**: Redis-backed session management for multi-instance deployments
+The [Model Context Protocol](https://modelcontextprotocol.io) is an open standard that enables seamless integration between AI applications and external data sources, tools, and services.
 
-This server serves as both primarily as a learning resource, and an example implementation of a scalable remote MCP server.
+## Why OAuth for MCP?
 
-## Repository Structure
-
-This repository contains **two complete, standalone implementations** to help you learn different MCP deployment patterns:
-
-```
-embedded-oauth/          # Complete example: MCP server with integrated OAuth
-  └── src/                # All code in one place, ready to run
-
-external-oauth/
-  ├── auth-server/        # Standalone OAuth authorization server
-  │   └── src/
-  └── mcp-server/         # MCP server that delegates to external auth
-      └── src/
-```
-
-Both modes are complete, independently buildable implementations with full test coverage. For more information on the difference between embedded and external OAuth, see [Authentication Modes](#authentication-modes).
+MCP servers often handle sensitive operations and data. This implementation shows how to:
+- Authenticate users before granting access to MCP resources
+- Integrate with existing identity providers (Auth0, Okta, Google)
+- Implement user session isolation in multi-tenant environments
+- Scale horizontally while maintaining security
 
 ## Quick Start
 
@@ -48,9 +37,7 @@ npm install                 # Install dependencies for all workspaces
 
 # 3. Start services
 docker compose up -d        # Start Redis
-npm run dev:embedded      # Start embedded-oauth server
-# OR
-npm run dev:external        # Start both auth-server and mcp-server
+npm run dev                 # Start both auth-server and mcp-server
 
 # 4. Test with Inspector
 npx -y @modelcontextprotocol/inspector
@@ -59,19 +46,146 @@ npx -y @modelcontextprotocol/inspector
 
 For detailed instructions, see [Installation](#installation).
 
+## Repository Structure
+
+This repository demonstrates a production-ready MCP deployment pattern with separate authorization and resource servers:
+
+```
+auth-server/             # OAuth 2.0 authorization server
+  └── src/               # Authorization endpoints and token management
+
+mcp-server/              # MCP resource server
+  └── src/               # MCP protocol implementation with external auth
+
+scripts/                 # Testing and deployment scripts
+docs/                    # Architecture and API documentation
+examples/                # Example code and usage patterns
+```
+
+The architecture separates authentication concerns from MCP functionality, allowing you to integrate with existing OAuth providers (Auth0, Okta, etc.) or deploy your own authorization server.
+
+## Usage Examples
+
+### Making Your First MCP Request
+
+Once the servers are running, here's how to interact with them:
+
+#### 1. Register an OAuth Client
+
+```bash
+# Register your application with the auth server
+curl -X POST http://localhost:3001/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "client_name": "my-mcp-client",
+    "redirect_uris": ["http://localhost:3000/callback"]
+  }'
+
+# Response:
+# {
+#   "client_id": "abc123...",
+#   "client_secret": "xyz789...",
+#   "client_name": "my-mcp-client"
+# }
+```
+
+#### 2. Get an Access Token
+
+For testing, use the MCP Inspector which handles the OAuth flow automatically. For programmatic access, implement the OAuth 2.0 authorization code flow (see [docs/oauth-flow.md](docs/oauth-flow.md)).
+
+#### 3. Initialize MCP Session
+
+```bash
+# Initialize a new MCP session
+curl -X POST http://localhost:3232/mcp \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": "1",
+    "method": "initialize",
+    "params": {
+      "protocolVersion": "2024-11-05",
+      "capabilities": {},
+      "clientInfo": {
+        "name": "my-client",
+        "version": "1.0"
+      }
+    }
+  }'
+
+# Response includes session ID for subsequent requests
+```
+
+#### 4. Use MCP Features
+
+```bash
+# List available tools
+curl -X POST http://localhost:3232/mcp \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Mcp-Session-Id: YOUR_SESSION_ID" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": "2",
+    "method": "tools/list"
+  }'
+
+# Call a tool (echo example)
+curl -X POST http://localhost:3232/mcp \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Mcp-Session-Id: YOUR_SESSION_ID" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": "3",
+    "method": "tools/call",
+    "params": {
+      "name": "echo",
+      "arguments": {
+        "message": "Hello, MCP!"
+      }
+    }
+  }'
+```
+
+For more examples, see the [examples/](examples/) directory.
+
+## Understanding the Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Client as Your App
+    participant Auth as Auth Server (:3001)
+    participant MCP as MCP Server (:3232)
+
+    User->>Client: Wants to use MCP
+    Client->>Auth: 1. Register & OAuth flow
+    Auth->>User: 2. Login page
+    User->>Auth: 3. Authenticate
+    Auth->>Client: 4. Access token
+    Client->>MCP: 5. MCP request + token
+    MCP->>Auth: 6. Validate token
+    Auth->>MCP: 7. Token valid ✓
+    MCP->>Client: 8. MCP response
+    Client->>User: 9. Results
+```
+
+The auth server is separate so you can easily replace it with Auth0, Okta, or any OAuth provider. See [docs/oauth-patterns.md](docs/oauth-patterns.md) for alternative architectures.
+
 ## Table of Contents
 
 - [Quick Start](#quick-start)
 - [Features](#features)
 - [Installation](#installation)
 - [Configuration](#configuration)
-- [Authentication Modes](#authentication-modes)
+- [Architecture](#architecture)
 - [Development](#development)
   - [Testing with MCP Inspector](#testing-with-mcp-inspector)
   - [Automated End-to-End Testing](#automated-end-to-end-testing)
-  - [Interactive Testing](#interactive-testing)
-- [Troubleshooting](#troubleshooting)
-- [Architecture & Technical Details](#architecture--technical-details)
+- [Common Issues & Solutions](#common-issues--solutions)
+- [Technical Details](#technical-details)
 - [API Reference](#api-reference)
 - [Security](#security)
 - [Monitoring & Debugging](#monitoring--debugging)
@@ -96,10 +210,10 @@ For detailed instructions, see [Installation](#installation).
 - **Horizontal Scaling**: Any instance can handle any request
 
 ### Authentication & Security
-- **Dual Mode Support**: Run with integrated or separate authorization server
 - **[OAuth 2.0](https://modelcontextprotocol.io/specification/2025-03-26/basic/authorization)**: Complete authorization flow with PKCE support
-- **External Auth Ready**: Demonstrates integration with external OAuth providers
-- **Session Ownership**: User isolation and access control  
+- **Separate Auth Server**: Demonstrates integration with external OAuth providers
+- **Token Introspection**: Validates tokens via [RFC 7662](https://datatracker.ietf.org/doc/html/rfc7662)
+- **Session Ownership**: User isolation and access control
 - **Security Headers**: CSP, HSTS, X-Frame-Options, and more
 - **Bearer Token Auth**: Middleware for protected endpoints
 
@@ -138,25 +252,10 @@ sudo apt-get install redis-server && sudo systemctl start redis
 ```bash
 git clone https://github.com/modelcontextprotocol/example-remote-server.git
 cd example-remote-server
-npm install  # Installs dependencies for all workspaces (embedded-oauth, auth-server, mcp-server)
+npm install  # Installs dependencies for all workspaces
 ```
 
-### Step 3: Choose Your Mode
-The repository includes two complete, standalone examples:
-
-**Option A: Embedded OAuth (Simpler)**
-```bash
-cd embedded-oauth
-# Everything is configured by default in .env
-```
-
-**Option B: External OAuth (Production-like)**
-```bash
-cd external-oauth/auth-server  # Auth server configuration in .env
-cd external-oauth/mcp-server   # MCP server configuration in .env
-```
-
-### Step 4: Start Redis
+### Step 3: Start Redis
 ```bash
 # Ensure Docker/OrbStack is running first!
 docker compose up -d
@@ -165,33 +264,21 @@ docker compose up -d
 docker compose ps
 ```
 
-### Step 5: Start and Verify
-
-**Embedded OAuth:**
+### Step 4: Start the Servers
 ```bash
-npm run dev:embedded
-# Server starts on http://localhost:3232
-```
+# Start both servers concurrently
+npm run dev
 
-**External OAuth:**
-```bash
-npm run dev:external
-# Auth server starts on http://localhost:3001
-# MCP server starts on http://localhost:3232
+# Or start them individually:
+npm run dev:auth-server  # Auth server on http://localhost:3001
+npm run dev:mcp-server   # MCP server on http://localhost:3232
 ```
 
 ## Configuration
 
-Each mode has its own `.env` file pre-configured:
+Each server has its own `.env` file:
 
-**Embedded OAuth** (`embedded-oauth/.env`):
-```bash
-BASE_URI=http://localhost:3232     # MCP server URL
-PORT=3232                          # MCP server port
-REDIS_URL=redis://localhost:6379   # Redis connection
-```
-
-**External OAuth Auth Server** (`external-oauth/auth-server/.env`):
+**Auth Server** (`auth-server/.env`):
 ```bash
 AUTH_SERVER_URL=http://localhost:3001  # Auth server URL
 AUTH_SERVER_PORT=3001                  # Auth server port
@@ -199,7 +286,7 @@ BASE_URI=http://localhost:3232         # MCP server URL (for redirects)
 REDIS_URL=redis://localhost:6379       # Redis connection
 ```
 
-**External OAuth MCP Server** (`external-oauth/mcp-server/.env`):
+**MCP Server** (`mcp-server/.env`):
 ```bash
 BASE_URI=http://localhost:3232         # MCP server URL
 PORT=3232                              # MCP server port
@@ -207,158 +294,12 @@ AUTH_SERVER_URL=http://localhost:3001  # External auth server URL
 REDIS_URL=redis://localhost:6379       # Redis connection
 ```
 
-## Authentication Modes
+## Architecture
 
-Per the [MCP Authorization specification](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization), the authorization server may be hosted with the resource server or as a separate entity. This repository demonstrates both patterns.
+Per the [MCP Authorization specification](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization), this implementation demonstrates a production-ready pattern with separate authorization and resource servers.
 
-### Embedded OAuth
-**Location**: `embedded-oauth/`
+### System Architecture
 
-OAuth authorization server hosted with the MCP resource server. Demonstrates self-hosted OAuth with upstream identity provider delegation (enterprise pattern where you control OAuth but delegate user authentication to corporate SSO/LDAP).
-
-```bash
-npm run dev:embedded  # Single server on :3232
-```
-
-See [embedded-oauth/README.md](embedded-oauth/README.md) for details.
-
-### External OAuth
-**Location**: `external-oauth/`
-
-MCP resource server using a completely separate OAuth authorization server. Demonstrates the OAuth-as-a-Service pattern (modern SaaS pattern using Auth0, Okta, or similar providers).
-
-```bash
-npm run dev:external  # Auth server on :3001, MCP server on :3232
-```
-
-See [external-oauth/README.md](external-oauth/README.md) for architecture and implementation details.
-
-## Development
-
-```bash
-# Start servers
-npm run dev:embedded        # Embedded OAuth
-npm run dev:external        # External OAuth (both servers)
-npm run dev:auth-server     # External OAuth - auth server only
-npm run dev:mcp-server      # External OAuth - MCP server only
-```
-
-### Build & Production
-```bash
-npm run build               # Build all workspaces
-npm run build:embedded      # Build embedded OAuth only
-npm run build:external      # Build external OAuth only
-
-npm run start:embedded      # Run embedded OAuth
-npm run start:external      # Run external OAuth (both servers)
-```
-
-### Testing & Quality
-```bash
-npm test                    # All unit tests (189 total)
-npm run lint                # Lint all code
-npm run typecheck           # Typecheck all code
-
-npm run test:e2e            # Run all e2e tests
-npm run test:e2e:embedded   # E2E test for embedded OAuth
-npm run test:e2e:external   # E2E test for external OAuth
-```
-
-### Testing with MCP Inspector
-
-The MCP Inspector is a web-based tool for testing MCP servers.
-
-#### Prerequisites
-1. Ensure Docker/OrbStack is running
-2. Ensure Redis is running: `docker compose ps`
-
-#### Test Embedded OAuth
-```bash
-# 1. Start the server (Redis must already be running)
-npm run dev:embedded
-
-# 2. Launch MCP Inspector in a new terminal
-npx -y @modelcontextprotocol/inspector
-
-# 3. Connect to: http://localhost:3232/mcp
-# 4. Navigate to Auth tab and complete OAuth flow
-```
-
-#### Test External OAuth
-```bash
-# 1. Start both servers (Redis must already be running)
-npm run dev:external
-
-# 2. Launch MCP Inspector in a new terminal
-npx -y @modelcontextprotocol/inspector
-
-# 3. Connect to: http://localhost:3232/mcp
-# 4. Auth flow will redirect to :3001 for authentication
-```
-
-### Test Categories
-- **Unit Tests**: Component testing (189 tests across all workspaces)
-- **Integration Tests**: Transport and Redis integration
-- **E2E Tests**: Complete OAuth + MCP feature verification
-
-### End-to-End Testing
-
-E2E scripts in `scripts/` verify complete OAuth flows and MCP features:
-
-```bash
-npm run test:e2e:embedded    # Test embedded OAuth
-npm run test:e2e:external    # Test external OAuth
-npm run test:e2e               # Run both
-```
-
-Scripts automatically manage server lifecycle, test OAuth 2.0 + PKCE flow, and verify all MCP features.
-
-## Troubleshooting
-
-### Common Issues
-
-**"Cannot connect to Docker daemon"**
-- Ensure Docker Desktop or OrbStack daemon is running
-- macOS with OrbStack: `orbctl start` (verify with `orbctl status`)
-- Windows/Linux/macOS with Docker Desktop: Start Docker Desktop application
-
-**"Redis connection refused"**
-- Check Redis is running: `docker compose ps`
-- If not running: `docker compose up -d`
-- Ensure Docker/OrbStack is started first
-
-**"Missing .env file"**
-- Each mode directory has a pre-configured `.env` file
-- embedded-oauth/.env, external-oauth/auth-server/.env, external-oauth/mcp-server/.env
-
-**"Port already in use"**
-- Check for existing processes: `lsof -i :3232` or `lsof -i :3001`
-- Kill existing processes or change PORT in .env
-
-**"npm install fails"**
-- Ensure Node.js >= 16 is installed: `node --version`
-- Clear npm cache: `npm cache clean --force`
-- Delete node_modules and package-lock.json, then retry
-
-**"Authentication flow fails"**
-- Check server logs for error messages
-- Ensure Redis is running: `docker compose ps`
-- Verify .env configuration in the mode directory you're running
-
-## Architecture & Technical Details
-
-### Authentication Architecture
-
-#### Embedded OAuth
-```mermaid
-graph TD
-    Client["MCP Client<br/>(Inspector)"]
-    MCP["MCP Server<br/>(port 3232)<br/>• OAuth Server<br/>• Resource Server"]
-
-    Client <-->|"OAuth flow & MCP resources"| MCP
-```
-
-#### External OAuth
 ```mermaid
 graph TD
     Client["MCP Client<br/>(Inspector)"]
@@ -371,64 +312,178 @@ graph TD
     MCP <-->|"Token validation<br/>(introspect)"| Auth
 ```
 
+This architecture pattern:
+- **Separates concerns**: Auth server handles OAuth, MCP server handles protocol
+- **Enables integration**: Can replace auth server with Auth0, Okta, etc.
+- **Scales independently**: Auth and MCP servers can scale based on their load
+- **Follows standards**: Uses OAuth 2.0 and token introspection (RFC 7662)
+
+For alternative patterns like embedded OAuth, see [docs/oauth-patterns.md](docs/oauth-patterns.md).
+
 ### OAuth Flow
 
-Both modes implement OAuth 2.1 with PKCE. For detailed flow analysis including data storage, TTLs, and mode-specific differences, see [docs/oauth-flow.md](docs/oauth-flow.md).
+The implementation uses OAuth 2.1 with PKCE. For detailed flow analysis including data storage, TTLs, and implementation details, see [docs/oauth-flow.md](docs/oauth-flow.md).
+
+### Understanding the Mock Identity Provider
+
+The `/mock-upstream-idp` endpoints simulate what a real identity provider (Google, GitHub, corporate SSO) would do. In production, users would be redirected to their actual identity provider for login. This mock implementation helps you test the complete flow locally without external dependencies.
 
 ### Project Structure
 ```
-├── embedded-oauth/              # Complete integrated auth example
+├── auth-server/                 # OAuth authorization server
 │   ├── src/
-│   │   ├── index.ts             # Main entry point (MCP + OAuth)
+│   │   ├── index.ts             # Auth server entry point
 │   │   ├── auth/
 │   │   │   ├── provider.ts      # FeatureReferenceAuthProvider
 │   │   │   └── auth-core.ts     # Token generation, PKCE
-│   │   ├── services/
-│   │   │   ├── mcp.ts           # MCP server implementation
-│   │   │   ├── auth.ts          # Auth service wrappers
-│   │   │   ├── redis-auth.ts    # Redis auth operations
-│   │   │   └── redisTransport.ts # Redis-backed transport
-│   │   ├── handlers/            # SHTTP, SSE, mock-upstream-idp handlers
-│   │   ├── utils/logger.ts      # Structured logging
-│   │   └── ...
+│   │   ├── services/            # Auth services, redis-auth
+│   │   ├── handlers/            # Mock upstream auth
+│   │   └── utils/logger.ts      # Structured logging
 │   ├── package.json
 │   ├── tsconfig.json
 │   └── .env
 │
-├── external-oauth/
-│   ├── auth-server/             # Standalone OAuth server
-│   │   ├── src/
-│   │   │   ├── index.ts         # Auth server entry point
-│   │   │   ├── auth/
-│   │   │   │   ├── provider.ts  # FeatureReferenceAuthProvider
-│   │   │   │   └── auth-core.ts
-│   │   │   ├── services/        # Auth services, redis-auth
-│   │   │   ├── handlers/        # Mock upstream auth
-│   │   │   └── ...
-│   │   ├── package.json
-│   │   └── .env
-│   │
-│   └── mcp-server/              # MCP server with external auth
-│       ├── src/
-│       │   ├── index.ts         # MCP server entry point
-│       │   ├── auth/
-│       │   │   ├── external-verifier.ts  # Token introspection
-│       │   │   └── auth-core.ts
-│       │   ├── services/        # MCP server, redisTransport
-│       │   ├── handlers/        # SHTTP, SSE handlers
-│       │   └── ...
-│       ├── package.json
-│       └── .env
+├── mcp-server/                  # MCP resource server
+│   ├── src/
+│   │   ├── index.ts             # MCP server entry point
+│   │   ├── auth/
+│   │   │   ├── external-verifier.ts  # Token introspection
+│   │   │   └── auth-core.ts
+│   │   ├── services/            # MCP server, redisTransport
+│   │   ├── handlers/            # SHTTP, SSE handlers
+│   │   └── utils/logger.ts
+│   ├── package.json
+│   ├── tsconfig.json
+│   └── .env
 │
-├── scripts/                     # End-to-end testing scripts
-│   ├── test-integrated-e2e.sh   # OAuth + feature verification (integrated)
-│   └── test-separate-e2e.sh     # OAuth + feature verification (separate)
+├── scripts/                     # Testing and deployment
+│   └── test-e2e.sh              # End-to-end OAuth + MCP verification
 ├── docs/
-│   ├── streamable-http-design.md  # SHTTP implementation details
-│   └── user-id-system.md          # Authentication flow documentation
-├── package.json                   # Root workspace configuration
-└── docker-compose.yml             # Redis service
+│   ├── endpoints.md             # API endpoint reference
+│   ├── oauth-flow.md            # OAuth flow documentation
+│   ├── oauth-patterns.md        # Alternative OAuth patterns
+│   └── session-ownership.md     # Session management details
+├── examples/                    # Example code and usage patterns
+│   ├── client.js                # Node.js client example
+│   └── curl-examples.sh         # Shell script with curl examples
+├── package.json                 # Root workspace configuration
+└── docker-compose.yml           # Redis service
 ```
+
+## Development
+
+```bash
+# Start servers
+npm run dev                 # Both servers concurrently
+npm run dev:auth-server     # Auth server only
+npm run dev:mcp-server      # MCP server only
+```
+
+### Build & Production
+```bash
+npm run build               # Build all workspaces
+npm run start               # Run both servers
+npm run start:auth-server   # Run auth server only
+npm run start:mcp-server    # Run MCP server only
+```
+
+### Testing & Quality
+```bash
+npm test                    # All unit tests
+npm run lint                # Lint all code
+npm run typecheck           # Typecheck all code
+npm run test:e2e            # End-to-end test
+```
+
+### Testing with MCP Inspector
+
+The MCP Inspector is a web-based tool for testing MCP servers.
+
+#### Prerequisites
+1. Ensure Docker/OrbStack is running
+2. Ensure Redis is running: `docker compose ps`
+
+#### Test the Server
+```bash
+# 1. Start both servers (Redis must already be running)
+npm run dev
+
+# 2. Launch MCP Inspector in a new terminal
+npx -y @modelcontextprotocol/inspector
+
+# 3. Connect to: http://localhost:3232/mcp
+# 4. Auth flow will redirect to :3001 for authentication
+# 5. Complete OAuth flow in the Auth tab
+# 6. Test MCP features (tools, resources, prompts, etc.)
+```
+
+### Automated End-to-End Testing
+
+The E2E script in `scripts/test-e2e.sh` verifies the complete OAuth flow and all MCP features:
+
+```bash
+npm run test:e2e
+```
+
+The script:
+- Automatically manages server lifecycle
+- Tests OAuth 2.0 + PKCE flow
+- Verifies all MCP features (tools, resources, prompts)
+- Validates token introspection between servers
+- Tests session management and ownership
+
+## Common Issues & Solutions
+
+### "Token validation failed"
+- **Cause**: Token expired or servers not communicating
+- **Solution**:
+  - Ensure both servers are running (`npm run dev`)
+  - Check that Redis is running (`docker compose ps`)
+  - Verify the token hasn't expired (tokens last 7 days)
+
+### "Cannot connect to MCP server"
+- **Cause**: Incorrect URL or missing path
+- **Solution**:
+  - Use full URL: `http://localhost:3232/mcp` (not just `:3232`)
+  - Include the `/mcp` path for MCP endpoints
+  - Ensure you have a valid Bearer token in the Authorization header
+
+### "Cannot connect to Docker daemon"
+- **Cause**: Docker/OrbStack not running
+- **Solution**:
+  - macOS with OrbStack: `orbctl start` (verify with `orbctl status`)
+  - Windows/Linux/macOS with Docker Desktop: Start Docker Desktop application
+
+### "Redis connection refused"
+- **Cause**: Redis container not running
+- **Solution**:
+  - Check Redis is running: `docker compose ps`
+  - If not running: `docker compose up -d`
+  - Ensure Docker/OrbStack is started first
+
+### "Port already in use"
+- **Cause**: Another process using port 3001 or 3232
+- **Solution**:
+  - Check for existing processes: `lsof -i :3232` or `lsof -i :3001`
+  - Kill existing processes or change PORT in .env files
+
+### Understanding the Mock IDP
+- The mock IDP simulates user login for testing
+- In production, this would be replaced by:
+  - Your company's SSO system (LDAP, Active Directory)
+  - Auth0/Okta login page
+  - Google/GitHub OAuth
+- The mock IDP creates random user IDs for testing multi-user scenarios
+
+### "Authentication flow fails"
+- **Cause**: Misconfiguration or servers not communicating
+- **Solution**:
+  - Check server logs for error messages
+  - Ensure Redis is running: `docker compose ps`
+  - Verify .env configuration in both server directories
+  - Check that both servers are running
+
+## Technical Details
 
 ### Scalability Architecture
 
@@ -465,7 +520,7 @@ auth:exch:{authCode}                        # Token exchanges
 auth:refresh:{refreshToken}                 # Refresh tokens
 ```
 
-Note: The `auth:` prefix ensures complete namespace isolation between auth and MCP functions in both integrated and separate modes.
+Note: The `auth:` prefix ensures complete namespace isolation between auth and MCP functions.
 
 ### Transport Methods
 
@@ -476,8 +531,6 @@ Modern [transport](https://modelcontextprotocol.io/specification/2025-03-26/basi
 - Efficient message buffering
 - Automatic reconnection support
 
-See [docs/streamable-http-design.md](docs/streamable-http-design.md) for implementation details.
-
 #### Server-Sent Events (Legacy)
 Backwards-compatible [transport](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports#server-sent-events) using SSE:
 - Separate endpoints for SSE streams and messages
@@ -487,15 +540,16 @@ Backwards-compatible [transport](https://modelcontextprotocol.io/specification/2
 
 ## API Reference
 
-For a complete listing of all endpoints provided by each server configuration, including OAuth authorization endpoints, MCP resource endpoints, and demo identity provider endpoints, see [docs/endpoints.md](docs/endpoints.md).
+For a complete listing of all endpoints provided by each server, including OAuth authorization endpoints, MCP resource endpoints, and demo identity provider endpoints, see [docs/endpoints.md](docs/endpoints.md).
 
 ## Security
 
 ### Implemented Security Measures
 - **Authentication**: [OAuth 2.0](https://modelcontextprotocol.io/specification/2025-03-26/basic/authorization) with bearer tokens
+- **Token Validation**: Introspection via [RFC 7662](https://datatracker.ietf.org/doc/html/rfc7662)
 - **Authorization**: User-based session ownership
 - **Session Isolation**: Users can only access their own sessions
-- **Security Headers**: 
+- **Security Headers**:
   - Content Security Policy (CSP)
   - Strict Transport Security (HSTS)
   - X-Frame-Options
@@ -587,7 +641,7 @@ Built by the Model Context Protocol team as a reference implementation for the M
 
 ### OAuth 2.0 / 2.1 Resources
 - [RFC 6749: OAuth 2.0 Framework](https://datatracker.ietf.org/doc/html/rfc6749)
-- [RFC 7662: Token Introspection](https://datatracker.ietf.org/doc/html/rfc7662) (used in separate mode)
+- [RFC 7662: Token Introspection](https://datatracker.ietf.org/doc/html/rfc7662)
 - [OAuth 2.1 Draft](https://oauth.net/2.1/) - Modern security best practices
 - [OAuth.net: End User Authentication](https://oauth.net/articles/authentication/)
 - [The Resource Server - OAuth 2.0 Simplified](https://www.oauth.com/oauth2-servers/the-resource-server/)

@@ -1,10 +1,10 @@
 # Endpoint Reference
 
-Complete listing of all endpoints provided by each server configuration.
+Complete listing of all endpoints provided by each server in the architecture.
 
-## Embedded OAuth Server (Port 3232)
+## Auth Server (Port 3001)
 
-Single server hosting OAuth authorization, mock identity provider, and MCP resources.
+Standalone OAuth 2.0 authorization server that handles authentication and token management.
 
 ### OAuth Authorization Endpoints
 Provided by `mcpAuthRouter` from MCP SDK:
@@ -15,62 +15,21 @@ Provided by `mcpAuthRouter` from MCP SDK:
 - `POST /token` - Token exchange (authorization code → tokens) and token refresh
 - `POST /revoke` - Token revocation
 
+### Token Introspection
+Custom implementation for resource server token validation:
+
+- `POST /introspect` - Token introspection ([RFC 7662](https://datatracker.ietf.org/doc/html/rfc7662))
+  - Called by MCP server to validate tokens
+  - Returns token status, scopes, expiry, user info
+  - Protected endpoint (not public)
+
 ### Mock Upstream Identity Provider Endpoints
 Local simulation of upstream IDP (would be external in production):
 
 - `GET /mock-upstream-idp/authorize` - Mock user authentication page
 - `GET /mock-upstream-idp/callback` - IDP callback handler (returns userId)
 
-**Note**: In production, the OAuth server would redirect to external URLs like `https://accounts.google.com` or `https://login.okta.com` instead of these local endpoints.
-
-### MCP Resource Endpoints
-
-#### Streamable HTTP Transport (Recommended)
-- `GET /mcp` - Establish SSE stream for session
-- `POST /mcp` - Initialize session or send messages
-- `DELETE /mcp` - Terminate session
-
-#### SSE Transport (Legacy)
-- `GET /sse` - Establish SSE connection
-- `POST /message` - Send messages to session
-
-All MCP endpoints require `Authorization: Bearer <token>` header.
-
-### Static Assets
-- `GET /` - Splash page (HTML)
-- `GET /mcp-logo.png` - MCP logo
-- `GET /styles.css` - Stylesheet
-
----
-
-## External OAuth - Auth Server (Port 3001)
-
-Standalone OAuth authorization server (represents Auth0, Okta, etc. in production).
-
-### OAuth Authorization Endpoints
-Provided by `mcpAuthRouter` from MCP SDK:
-
-- `GET /.well-known/oauth-authorization-server` - OAuth metadata discovery
-- `POST /register` - Dynamic client registration
-- `GET /authorize` - Authorization request
-- `POST /token` - Token exchange and refresh
-- `POST /revoke` - Token revocation
-
-### Token Introspection
-Custom implementation for resource server token validation:
-
-- `POST /introspect` - Token introspection (RFC 7662)
-  - Called by MCP server to validate tokens
-  - Returns token status, scopes, expiry, user info
-  - Protected endpoint (not public)
-
-### Mock Upstream Identity Provider Endpoints
-Local simulation of upstream IDP:
-
-- `GET /mock-upstream-idp/authorize` - Mock user authentication page
-- `GET /mock-upstream-idp/callback` - IDP callback handler
-
-**Note**: Commercial OAuth providers (Auth0, Okta) have their own user authentication systems. These endpoints simulate that functionality.
+**Note**: In production, this would redirect to external providers like Auth0, Okta, Google, GitHub, etc. These endpoints simulate that functionality for demonstration purposes.
 
 ### Utility Endpoints
 - `GET /health` - Health check (returns server status)
@@ -78,9 +37,9 @@ Local simulation of upstream IDP:
 
 ---
 
-## External OAuth - MCP Server (Port 3232)
+## MCP Server (Port 3232)
 
-Pure MCP resource server with no OAuth authorization functionality.
+MCP resource server that implements the Model Context Protocol with delegated authentication.
 
 ### OAuth Metadata (Read-Only)
 Provided by `mcpAuthMetadataRouter`:
@@ -103,21 +62,21 @@ Provided by `mcpAuthMetadataRouter`:
 All MCP endpoints require `Authorization: Bearer <token>` header. Tokens are validated by calling the auth server's `/introspect` endpoint.
 
 ### Static Assets
-- `GET /` - Splash page
+- `GET /` - Splash page (HTML)
 - `GET /mcp-logo.png` - MCP logo
 - `GET /styles.css` - Stylesheet
 
 ---
 
-## Key Differences
+## Architecture Overview
 
-| Endpoint Type | Embedded OAuth | External Auth Server | External MCP Server |
-|---------------|----------------|---------------------|---------------------|
-| OAuth authorization (`/authorize`, `/token`) | ✅ Full | ✅ Full | ❌ None |
-| Token introspection (`/introspect`) | ❌ Not needed | ✅ Yes | ❌ Not needed |
-| OAuth metadata discovery | ✅ Yes | ✅ Yes | ✅ Read-only redirect |
-| Mock IDP (`/mock-upstream-idp`) | ✅ Yes | ✅ Yes | ❌ No |
-| MCP resources (`/mcp`, `/sse`) | ✅ Yes | ❌ No | ✅ Yes |
+| Endpoint Type | Auth Server | MCP Server |
+|---------------|-------------|------------|
+| OAuth authorization (`/authorize`, `/token`) | ✅ Full implementation | ❌ None (delegates to auth server) |
+| Token introspection (`/introspect`) | ✅ Provides service | ❌ Consumes service |
+| OAuth metadata discovery | ✅ Authoritative | ✅ Read-only redirect |
+| Mock IDP (`/mock-upstream-idp`) | ✅ Yes | ❌ No |
+| MCP resources (`/mcp`, `/sse`) | ❌ No | ✅ Yes |
 
 ---
 
@@ -143,6 +102,17 @@ All MCP endpoints require `Authorization: Bearer <token>` header. Tokens are val
 - `Content-Type: text/event-stream`
 - `Cache-Control: no-store, max-age=0`
 - `Connection: keep-alive`
+
+---
+
+## Authentication Flow
+
+1. **Client discovers auth server**: GET `/.well-known/oauth-authorization-server` from MCP server
+2. **Client registers**: POST to auth server's `/register` endpoint
+3. **User authorizes**: Redirected to auth server's `/authorize` endpoint
+4. **Token exchange**: POST to auth server's `/token` endpoint
+5. **Access MCP resources**: Use bearer token with MCP server endpoints
+6. **Token validation**: MCP server validates tokens via auth server's `/introspect` endpoint
 
 ---
 

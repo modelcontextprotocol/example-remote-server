@@ -16,7 +16,7 @@ This server shows how to build an MCP server that delegates all OAuth operations
 # This server requires the auth server to be running!
 
 # Option 1: Start both servers from repo root
-cd ../.. && npm run dev:separate
+cd .. && npm run dev
 
 # Option 2: Start servers individually
 # Terminal 1:
@@ -140,11 +140,11 @@ The MCP server code otherwise remains unchanged.
 - [RFC 7662: Token Introspection](https://datatracker.ietf.org/doc/html/rfc7662)
 - [MCP Authorization Spec](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization)
 - [OAuth 2.0 Resource Servers](https://www.oauth.com/oauth2-servers/the-resource-server/)
-- [docs/oauth-flow.md](../../docs/oauth-flow.md) - Detailed flow with mode differences
 
 ## Related Documentation
 
-- [Main README](../../README.md) - Complete project documentation
+- [Main README](../README.md) - Complete project documentation
 - [Auth Server README](../auth-server/README.md) - The demo OAuth provider
-- [External OAuth Overview](../README.md) - Architecture explanation
-- [Embedded OAuth](../../embedded-oauth/README.md) - Self-hosted OAuth alternative
+- [OAuth Patterns](../docs/oauth-patterns.md) - OAuth architecture patterns
+- [OAuth Flow](../docs/oauth-flow.md) - Detailed OAuth flow analysis
+- [Session Ownership](../docs/session-ownership.md) - Session management details

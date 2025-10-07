@@ -23,11 +23,11 @@ User ID sources:
 
 When the MCP server validates an access token:
 
-**Embedded OAuth**: Reads `McpInstallation` from Redis, extracts `installation.userId`
+1. MCP server calls the auth server's `/introspect` endpoint with the token
+2. Auth server validates the token and returns user information including the `sub` field (user ID)
+3. MCP server populates `AuthInfo.extra.userId` with this user identifier
 
-**External OAuth**: Calls auth server's `/introspect` endpoint, receives `sub` field
-
-Both result in `AuthInfo.extra.userId` being populated.
+This separation allows the auth server to be replaced with any OAuth provider that supports token introspection.
 
 ### Session Creation
 

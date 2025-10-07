@@ -13,8 +13,7 @@
   },
   "files": [],
   "references": [
-    { "path": "./embedded-oauth" },
-    { "path": "./external-oauth/auth-server" },
-    { "path": "./external-oauth/mcp-server" }
+    { "path": "./auth-server" },
+    { "path": "./mcp-server" }
   ]
 }

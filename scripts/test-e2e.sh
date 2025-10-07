@@ -2,10 +2,10 @@
 set -e
 
 echo "=================================================="
-echo "End-to-End Test - External OAuth"
+echo "End-to-End Test - OAuth Flow and MCP Features"
 echo "=================================================="
 echo "This script tests the complete OAuth flow and MCP features"
-echo "using external auth server and MCP server."
+echo "using auth server and MCP server."
 echo ""
 
 # Kill any existing servers
@@ -17,13 +17,12 @@ sleep 2
 # Use environment variables if available, otherwise defaults
 AUTH_SERVER="${AUTH_SERVER_URL:-http://localhost:3001}"
 MCP_SERVER="${BASE_URI:-http://localhost:3232}"
-USER_ID="e2e-separate-$(date +%s)"
+USER_ID="e2e-test-$(date +%s)"
 
 echo "🔧 Configuration:"
 echo "  Auth Server: $AUTH_SERVER"
 echo "  MCP Server: $MCP_SERVER"
 echo "  User ID: $USER_ID"
-echo "  Auth Mode: ${AUTH_MODE:-separate} (from environment)"
 echo ""
 
 # Check prerequisites
@@ -37,16 +36,9 @@ if ! docker ps | grep -q redis; then
 fi
 echo "✅ Redis is running"
 
-# Check if wrong mode is set
-if [ "${AUTH_MODE}" = "integrated" ]; then
-    echo "⚠️  AUTH_MODE is set to 'integrated' but this script tests separate mode"
-    echo "   Either run: AUTH_MODE=separate $0"
-    echo "   Or use: ./scripts/test-integrated-e2e-fixed.sh"
-fi
-
 # Start auth server
 echo "Starting auth server..."
-(cd external-oauth/auth-server && npm start) &
+(cd auth-server && npm start) &
 AUTH_PID=$!
 sleep 5
 
@@ -58,9 +50,9 @@ if ! curl -s -f "$AUTH_SERVER/health" > /dev/null; then
 fi
 echo "✅ Auth server is running (PID: $AUTH_PID)"
 
-# Start MCP server with external OAuth
-echo "Starting MCP server with external OAuth..."
-(cd external-oauth/mcp-server && npm start) &
+# Start MCP server with OAuth delegation..."
+echo "Starting MCP server..."
+(cd mcp-server && npm start) &
 MCP_PID=$!
 sleep 5
 
@@ -85,7 +77,7 @@ echo "================================================="
 # This would typically be done once during app setup, not for each user
 echo "📝 Step 1: Register OAuth client with auth server"
 CLIENT_RESPONSE=$(curl -s -X POST -H "Content-Type: application/json" \
-  -d "{\"client_name\":\"e2e-separate-client\",\"redirect_uris\":[\"http://localhost:3000/callback\"]}" \
+  -d "{\"client_name\":\"e2e-test-client\",\"redirect_uris\":[\"http://localhost:3000/callback\"]}" \
   "$AUTH_SERVER/register")
 
 CLIENT_ID=$(echo "$CLIENT_RESPONSE" | jq -r .client_id)
@@ -105,7 +97,7 @@ echo "   Code verifier generated"
 # Include state parameter for CSRF protection
 echo ""
 echo "🎫 Step 3: Get authorization code from auth server"
-STATE_PARAM="separate-test-$(date +%s)"
+STATE_PARAM="e2e-test-$(date +%s)"
 AUTH_URL="$AUTH_SERVER/authorize?response_type=code&client_id=$CLIENT_ID&redirect_uri=http://localhost:3000/callback&code_challenge=$CODE_CHALLENGE&code_challenge_method=S256&state=$STATE_PARAM"
 
 AUTH_PAGE=$(curl -s "$AUTH_URL")
@@ -167,7 +159,7 @@ echo "📱 Step 1: Initialize MCP session with MCP server"
 INIT_RESPONSE=$(curl -i -s -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H "Accept: application/json, text/event-stream" \
   -X POST -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":"init","method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"e2e-separate","version":"1.0"}}}' \
+  -d '{"jsonrpc":"2.0","id":"init","method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"e2e-test","version":"1.0"}}}' \
   "$MCP_SERVER/mcp")
 
 # Extract session ID from response header
@@ -202,7 +194,7 @@ if echo "$TOOLS_RESPONSE" | grep -q "event: message"; then
       -H "Accept: application/json, text/event-stream" \
       -H "Mcp-Session-Id: $SESSION_ID" \
       -X POST -H "Content-Type: application/json" \
-      -d '{"jsonrpc":"2.0","id":"echo","method":"tools/call","params":{"name":"echo","arguments":{"message":"Separate mode working!"}}}' \
+      -d '{"jsonrpc":"2.0","id":"echo","method":"tools/call","params":{"name":"echo","arguments":{"message":"E2E working!"}}}' \
       "$MCP_SERVER/mcp")
     
     if echo "$ECHO_RESPONSE" | grep -q "event: message"; then
@@ -276,11 +268,11 @@ else
 fi
 
 echo ""
-echo "EXTERNAL OAUTH E2E TEST COMPLETE!"
-echo "==================================="
+echo "E2E TEST COMPLETE!"
+echo "==================="
 echo "✅ OAuth flow: Auth server → MCP server delegation working"
 echo "✅ Token validation: MCP server accepts auth server tokens"
-echo "✅ Session management: MCP server creates sessions for external tokens"
+echo "✅ Session management: MCP server creates sessions with tokens"
 echo ""
 echo "📊 Verification Results:"
 echo "   Tools: $TOOL_COUNT (README: 7) $([ "$TOOL_COUNT" = "7" ] && echo "✅" || echo "❌")"
@@ -288,7 +280,7 @@ echo "   Resources: $RESOURCE_COUNT (README: 100) $([ "$RESOURCE_COUNT" = "100" 
 echo "   Prompts: $PROMPT_COUNT"
 echo ""
 echo "🏗️  Architecture Verified:"
-echo "   ✅ Separate auth server provides OAuth endpoints"
+echo "   ✅ Auth server provides OAuth endpoints"
 echo "   ✅ MCP server validates tokens via introspection"
 echo "   ✅ Session ownership works across server boundaries"
 
