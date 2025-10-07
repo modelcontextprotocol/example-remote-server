@@ -53,10 +53,10 @@ For detailed instructions, see [Installation](#installation).
 This repository demonstrates a production-ready MCP deployment pattern with separate authorization and resource servers:
 
 ```
-auth-server/             # OAuth 2.0 authorization server
+auth-server/             # OAuth 2.0 authorization server (demo only - replace in production)
   └── src/               # Authorization endpoints and token management
 
-mcp-server/              # MCP resource server
+mcp-server/              # MCP resource server (customize tools/resources/prompts)
   └── src/               # MCP protocol implementation with external auth
 
 scripts/                 # Testing and deployment scripts
@@ -64,7 +64,13 @@ docs/                    # Architecture and API documentation
 examples/                # Example code and usage patterns
 ```
 
-The architecture separates authentication concerns from MCP functionality, allowing you to integrate with existing OAuth providers (Auth0, Okta, etc.) or deploy your own authorization server.
+The architecture separates authentication concerns from MCP functionality, allowing you to integrate with commercial OAuth providers (Auth0, Okta, etc.).
+
+## Customizing for Your Use Case
+
+This is a reference implementation with demo tools, resources, and prompts. To adapt it for production:
+- **Replace MCP features:** See [Customization Guide](docs/customization-guide.md) for replacing demo functionality with your own
+- **Integrate OAuth provider:** See [OAuth Architecture Patterns](docs/oauth-architecture-patterns.md) for production authentication setup
 
 ## Usage Examples
 
@@ -174,7 +180,7 @@ sequenceDiagram
     Client->>User: 9. Results
 ```
 
-The auth server is separate so you can easily replace it with Auth0, Okta, or any OAuth provider. See [docs/oauth-patterns.md](docs/oauth-patterns.md) for alternative architectures.
+The auth server is separate so you can easily replace it with Auth0, Okta, or any OAuth provider. See [docs/oauth-architecture-patterns.md](docs/oauth-architecture-patterns.md) for integration guidance.
 
 ## Table of Contents
 
@@ -320,7 +326,7 @@ This architecture pattern:
 - **Scales independently**: Auth and MCP servers can scale based on their load
 - **Follows standards**: Uses OAuth 2.0 and token introspection (RFC 7662)
 
-For alternative patterns like embedded OAuth, see [docs/oauth-patterns.md](docs/oauth-patterns.md).
+For alternative patterns like embedded OAuth, see [docs/oauth-architecture-patterns.md](docs/oauth-architecture-patterns.md).
 
 ### OAuth Flow
 
@@ -361,9 +367,10 @@ The `/mock-upstream-idp` endpoints simulate what a real identity provider (Googl
 ├── scripts/                     # Testing and deployment
 │   └── test-e2e.sh              # End-to-end OAuth + MCP verification
 ├── docs/
+│   ├── customization-guide.md   # How to adapt this for your use case
 │   ├── endpoints.md             # API endpoint reference
 │   ├── oauth-flow.md            # OAuth flow documentation
-│   ├── oauth-patterns.md        # Alternative OAuth patterns
+│   ├── oauth-architecture-patterns.md  # OAuth integration guidance
 │   └── session-ownership.md     # Session management details
 ├── examples/                    # Example code and usage patterns
 │   ├── client.js                # Node.js client example

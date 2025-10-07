@@ -130,7 +130,8 @@ To use a commercial OAuth provider instead of the demo auth server, see [OAuth A
 ## Related Documentation
 
 - [Main README](../README.md) - Complete project documentation
+- [Customization Guide](../docs/customization-guide.md) - How to adapt this for your use case
 - [Auth Server README](../auth-server/README.md) - The demo OAuth provider
-- [OAuth Patterns](../docs/oauth-patterns.md) - OAuth architecture patterns
+- [OAuth Architecture Patterns](../docs/oauth-architecture-patterns.md) - OAuth integration options
 - [OAuth Flow](../docs/oauth-flow.md) - Detailed OAuth flow analysis
 - [Session Ownership](../docs/session-ownership.md) - Session management details
