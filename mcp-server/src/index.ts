@@ -13,7 +13,7 @@
  */
 
 import { BearerAuthMiddlewareOptions, requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
-import { getOAuthProtectedResourceMetadataUrl, mcpAuthMetadataRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
+import { getOAuthProtectedResourceMetadataUrl } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
 import express from "express";
@@ -135,11 +135,17 @@ app.use(baseSecurityHeaders);
 // Enable CORS pre-flight requests
 app.options('*', cors(corsOptions));
 
-// Rate limiting for custom endpoints
+// Rate limiting for endpoints
 const staticFileRateLimit = rateLimit({
   windowMs: 10 * 60 * 1000, // 10 minutes
   limit: 25, // 25 requests per 10 minutes for static files
   message: { error: 'too_many_requests', error_description: 'Static file rate limit exceeded' }
+});
+
+const mcpRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  limit: 100, // 100 requests per 15 minutes per IP
+  message: { error: 'too_many_requests', error_description: 'MCP rate limit exceeded' }
 });
 
 // MCP server using external auth server
@@ -150,7 +156,7 @@ logger.info('Starting MCP server', {
 });
 
 // Auth server state - will be populated asynchronously
-let authMetadata: any;
+let authMetadata: Record<string, unknown> | undefined;
 let authServerAvailable = false;
 
 // OAuth metadata endpoint - responds based on current auth server status
@@ -197,13 +203,13 @@ const bearerAuth: express.RequestHandler = (req, res, next) => {
 };
 
 // MCP routes (legacy SSE transport)
-app.get("/sse", cors(corsOptions), bearerAuth, sseHeaders, handleSSEConnection);
-app.post("/message", cors(corsOptions), bearerAuth, sensitiveDataHeaders, handleMessage);
+app.get("/sse", cors(corsOptions), mcpRateLimit, bearerAuth, sseHeaders, handleSSEConnection);
+app.post("/message", cors(corsOptions), mcpRateLimit, bearerAuth, sensitiveDataHeaders, handleMessage);
 
 // MCP routes (new streamable HTTP transport)
-app.get("/mcp", cors(corsOptions), bearerAuth, handleStreamableHTTP);
-app.post("/mcp", cors(corsOptions), bearerAuth, handleStreamableHTTP);
-app.delete("/mcp", cors(corsOptions), bearerAuth, handleStreamableHTTP);
+app.get("/mcp", cors(corsOptions), mcpRateLimit, bearerAuth, handleStreamableHTTP);
+app.post("/mcp", cors(corsOptions), mcpRateLimit, bearerAuth, handleStreamableHTTP);
+app.delete("/mcp", cors(corsOptions), mcpRateLimit, bearerAuth, handleStreamableHTTP);
 
 // Health check endpoint
 app.get("/health", (req, res) => {
@@ -291,9 +297,9 @@ async function connectToAuthServer() {
       authMetadata = await authMetadataResponse.json();
       authServerAvailable = true;
       logger.info('Successfully connected to auth server', {
-        issuer: authMetadata.issuer,
-        authorizationEndpoint: authMetadata.authorization_endpoint,
-        tokenEndpoint: authMetadata.token_endpoint
+        issuer: authMetadata?.issuer,
+        authorizationEndpoint: authMetadata?.authorization_endpoint,
+        tokenEndpoint: authMetadata?.token_endpoint
       });
       break; // Success, exit retry loop
 
