@@ -88,7 +88,7 @@ export async function handleMessage(req: Request, res: Response) {
 
     body = JSON.stringify(req.body);
   } catch (error) {
-    res.status(400).json(error);
+    res.status(400).json({ error: "Bad request" });
     logger.error('Bad POST request', error as Error, {
       sessionId,
       contentType: req.headers['content-type']

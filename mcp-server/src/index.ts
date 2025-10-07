@@ -229,7 +229,7 @@ app.get("/styles.css", staticFileRateLimit, (req, res) => {
 });
 
 // Splash page
-app.get("/", (req, res) => {
+app.get("/", staticFileRateLimit, (req, res) => {
   const splashPath = path.join(__dirname, "static", "index.html");
   res.sendFile(splashPath);
 });
