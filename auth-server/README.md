@@ -98,14 +98,13 @@ npm run typecheck     # Type checking
 npm run build         # Build to dist/
 ```
 
-## Production Replacement
+## Production Usage
 
-Commercial OAuth providers supporting RFC 7662 introspection:
-- Auth0, Okta, Azure AD/Microsoft Entra
-- AWS Cognito, Google Identity Platform
-- GitHub OAuth
+This demo server should be replaced with a commercial OAuth provider in production.
 
-The MCP server integrates with any RFC 7662-compliant provider.
+See [OAuth Architecture Patterns](../docs/oauth-architecture-patterns.md#using-a-commercial-auth-provider) for detailed integration guidance.
+
+**Supported providers:** Auth0, Okta, Azure AD, AWS Cognito, Google, GitHub, and any RFC 7662-compliant OAuth provider.
 
 ## Redis Data
 

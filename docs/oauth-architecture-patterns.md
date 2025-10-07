@@ -41,14 +41,49 @@ The current implementation demonstrates this pattern with separate authorization
 
 ### Using a Commercial Auth Provider
 
-Replacing the demo auth server with a commercial provider:
+The demo auth server should be replaced with a commercial OAuth provider in production.
 
-1. **Configure provider**: Set up OAuth app in commercial provider (e.g. Auth0/Okta)
-2. **Update metadata URL**: Point to provider's discovery endpoint
-3. **Configure introspection**: Set up token validation
-4. **Update redirect URIs**: Configure allowed callbacks
-5. **Migrate users**: Import existing users if needed
-6. **Test integration**: Verify full OAuth flow
+**Supported providers:**
+- Auth0, Okta, Azure AD/Microsoft Entra
+- AWS Cognito, Google Identity Platform
+- GitHub OAuth
+- Any RFC 7662-compliant OAuth provider
+
+#### Integration Steps
+
+1. **Configure provider**: Set up OAuth app in your provider
+   - Register your MCP server as a resource server
+   - Configure allowed redirect URIs
+   - Enable token introspection endpoint
+
+2. **Update MCP server environment** (`mcp-server/.env`):
+   ```bash
+   AUTH_SERVER_URL=https://your-tenant.auth0.com
+   # or https://your-domain.okta.com
+   # or https://login.microsoftonline.com/your-tenant
+   ```
+
+3. **Adjust token introspection** if needed (`mcp-server/src/auth/external-verifier.ts`):
+   ```typescript
+   // Most providers use RFC 7662 standard format, but some may differ
+   const response = await fetch(`${this.authServerUrl}/oauth/introspect`, {
+     method: 'POST',
+     headers: {
+       'Content-Type': 'application/x-www-form-urlencoded',
+       // Some providers require authentication here
+       'Authorization': `Basic ${Buffer.from('client_id:client_secret').toString('base64')}`
+     },
+     body: `token=${token}`
+   });
+   ```
+
+4. **Update redirect URIs**: Configure your provider's allowed callbacks to match your deployment URLs
+
+5. **Test the integration**: Verify the full OAuth flow with your provider
+
+**Note on token introspection:** Most providers use the RFC 7662 standard format. If your provider uses a non-standard format, you may need to adjust the response parsing in `mcp-server/src/auth/external-verifier.ts`.
+
+The MCP server code otherwise remains unchanged - it only needs to know where to validate tokens.
 
 ---
 

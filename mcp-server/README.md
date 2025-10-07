@@ -115,25 +115,11 @@ npm run typecheck     # Type checking
 npm run build         # Build to dist/
 ```
 
-## Production Adaptation
+## Production Usage
 
-To use a commercial OAuth provider:
+To use a commercial OAuth provider instead of the demo auth server, see [OAuth Architecture Patterns](../docs/oauth-architecture-patterns.md#using-a-commercial-auth-provider) for detailed integration guidance.
 
-1. Update `.env` with provider URL:
-```bash
-AUTH_SERVER_URL=https://your-tenant.auth0.com
-```
-
-2. Modify `src/auth/external-verifier.ts` for provider-specific introspection:
-```typescript
-const response = await fetch(`${this.authServerUrl}/oauth/introspect`, {
-  // Add provider-specific authentication
-})
-```
-
-3. Adjust response parsing if the introspection format differs from RFC 7662 standard
-
-The MCP server code otherwise remains unchanged.
+**Summary:** Update `AUTH_SERVER_URL` in `.env` to point to your provider. You may need to adjust `src/auth/external-verifier.ts` for provider-specific introspection formats, but the MCP server code otherwise remains unchanged.
 
 ## References
 
