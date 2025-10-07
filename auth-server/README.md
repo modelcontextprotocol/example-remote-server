@@ -1,94 +1,123 @@
-# MCP Standalone Authorization Server
+# Auth Server - Demo OAuth 2.0 Provider
 
-This is a demonstration OAuth 2.0 authorization server for MCP's separate authentication mode.
+Demonstration OAuth 2.0 authorization server representing commercial providers (Auth0, Okta, Google OAuth).
 
 ## Purpose
 
-This server demonstrates how MCP servers can delegate authentication to a separate authorization server. See the main [README Authentication Modes](../README.md#authentication-modes) section for a complete overview of integrated vs separate modes.
+Complete OAuth 2.1 server implementing:
+- Client registration (Dynamic Client Registration)
+- Authorization flow with PKCE
+- Token issuance and refresh
+- Token introspection (RFC 7662)
+- User authentication (via demo upstream IDP)
 
-In production environments, you would typically use established OAuth providers like:
-- Auth0, Okta
-- Google OAuth, GitHub OAuth  
-- Microsoft Azure AD, AWS Cognito
+In production, replace this server with a commercial OAuth provider.
 
-## Architecture
+## Quick Start
 
-For detailed architecture information and OAuth flow analysis, see:
-- [Authentication Modes](../README.md#authentication-modes) - Overview and comparison
-- [OAuth 2.0 + PKCE Flow Analysis](../README.md#oauth-20--pkce-flow-analysis) - Step-by-step flow breakdown
-- [Authentication Architecture](../README.md#authentication-architecture) - Visual diagrams
-
-This auth server specifically implements the "Auth Server" component in the separate mode architecture diagram.
-
-## Endpoints
-
-- `/.well-known/oauth-authorization-server` - OAuth 2.0 server metadata
-- `/authorize` - Authorization endpoint
-- `/token` - Token endpoint  
-- `/register` - Dynamic client registration
-- `/introspect` - Token introspection (for MCP server validation)
-- `/fakeupstreamauth/authorize` - Fake upstream auth page (demo only)
-- `/fakeupstreamauth/callback` - Fake upstream callback (demo only)
-- `/health` - Health check endpoint
-
-## Development
-
-This server shares Redis with the MCP server for development convenience.
-In production, these would typically be separate.
-
-## Running the Auth Server
-
-### Standalone
 ```bash
-# From the repository root
-npm run dev:auth-server
+# From this directory:
+npm run dev
+
+# Server starts on http://localhost:3001
 ```
 
-### With MCP Server (Separate Mode)
+## Flow
+
+```
+MCP Client ──OAuth──> Auth Server ──tokens──> MCP Client ──MCP requests──> MCP Server
+                                                                                │
+                                                                                └──validate──> Auth Server /introspect
+```
+
+1. MCP Client initiates OAuth flow with this server
+2. Server handles authorization and user authentication
+3. Server issues access tokens
+4. Client uses tokens to access MCP server
+5. MCP server validates tokens by calling this server's `/introspect` endpoint
+
+## Key Components
+
+### `src/index.ts`
+Main entry point. Sets up:
+- OAuth endpoints via SDK's `mcpAuthRouter`
+- Token introspection endpoint (`POST /introspect`)
+- Mock upstream auth UI for demo
+- Rate limiting and CORS
+
+### `src/auth/provider.ts`
+**FeatureReferenceAuthProvider** - Implements OAuth server logic:
+- Client registration storage
+- Authorization code generation
+- PKCE challenge validation
+- Token issuance and refresh
+- Token verification
+
+### `src/services/`
+- **auth.ts**: Auth service wrappers
+- **redis-auth.ts**: Redis operations for OAuth data
+
+### `src/handlers/mock-upstream-idp.ts`
+Mock upstream identity provider. Simulates user authentication that would be handled by corporate SSO or social login in production OAuth providers.
+
+## OAuth Endpoints
+
 ```bash
-# Start both servers together
-npm run dev:with-separate-auth
+# Discovery
+GET /.well-known/oauth-authorization-server
+
+# Client registration
+POST /register
+
+# Authorization
+GET /authorize?client_id=...&redirect_uri=...&code_challenge=...
+
+# Token exchange
+POST /token
+
+# Token introspection (called by MCP server)
+POST /introspect
+```
+
+## Configuration
+
+Environment variables in `.env`:
+```bash
+AUTH_SERVER_URL=http://localhost:3001
+AUTH_SERVER_PORT=3001
+BASE_URI=http://localhost:3232         # MCP server URL
+REDIS_URL=redis://localhost:6379
 ```
 
 ## Testing
 
-### Health Check
 ```bash
-curl http://localhost:3001/health
+npm test              # 37 unit tests
+npm run lint          # Lint code
+npm run typecheck     # Type checking
+npm run build         # Build to dist/
 ```
 
-### OAuth Metadata
-```bash
-curl http://localhost:3001/.well-known/oauth-authorization-server
-```
+## Production Usage
 
-### With MCP Inspector
-See the main [Testing with MCP Inspector](../README.md#testing-with-mcp-inspector) section for complete testing instructions for both modes.
+This demo server should be replaced with a commercial OAuth provider in production.
 
-**Quick test for this auth server:**
-1. Start this auth server: `npm run dev:auth-server`
-2. Start MCP server in separate mode: `AUTH_MODE=separate npm run dev` 
-3. Follow the separate mode testing steps in the main README
+See [OAuth Architecture Patterns](../docs/oauth-architecture-patterns.md#using-a-commercial-auth-provider) for detailed integration guidance.
 
-## Configuration
+**Supported providers:** Auth0, Okta, Azure AD, AWS Cognito, Google, GitHub, and any RFC 7662-compliant OAuth provider.
 
-The auth server uses the same configuration system as the main server. See [Configuration](../README.md#configuration) in the main README for complete environment variable documentation.
+## Redis Data
 
-**Auth server specific variables:**
-- `AUTH_SERVER_PORT` - Port to run on (default: 3001)
-- `AUTH_SERVER_URL` - Base URL (default: http://localhost:3001)
-- `REDIS_URL` - Redis connection (shared with MCP server)
+This server stores in Redis:
+- `auth:client:{clientId}` - OAuth client registrations (30 day TTL)
+- `auth:pending:{code}` - Pending authorizations (10 min TTL)
+- `auth:installation:{token}` - Active installations (7 day TTL)
+- `auth:refresh:{refreshToken}` - Refresh token mappings (7 day TTL)
+- `auth:exch:{code}` - Token exchanges (10 min TTL)
 
-## Production Considerations
+## Related Documentation
 
-**This server is for demonstration only.** In production, use established OAuth providers.
-
-For comprehensive security and deployment guidance, see:
-- [Security](../README.md#security) - Security measures and best practices
-- [Configuration](../README.md#configuration) - Environment setup
-- [Monitoring & Debugging](../README.md#monitoring--debugging) - Operational guidance
-
-**Production replacement options:**
-- Corporate SSO (Auth0, Okta)
-- Cloud providers (AWS Cognito, Azure AD)  
-- Social providers (Google OAuth, GitHub OAuth)
+- [Main README](../README.md) - Complete project documentation
+- [MCP Server README](../mcp-server/README.md) - How MCP server uses these tokens
+- [OAuth Architecture Patterns](../docs/oauth-architecture-patterns.md) - OAuth integration options
+- [OAuth Flow](../docs/oauth-flow.md) - Detailed OAuth flow analysis

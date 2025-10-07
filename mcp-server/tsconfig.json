@@ -4,6 +4,7 @@
     "module": "Node16",
     "moduleResolution": "Node16",
     "sourceMap": true,
+    "outDir": "./dist",
     "strict": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
@@ -11,9 +12,6 @@
     "isolatedModules": true,
     "skipLibCheck": true
   },
-  "files": [],
-  "references": [
-    { "path": "./auth-server" },
-    { "path": "./mcp-server" }
-  ]
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
 }
