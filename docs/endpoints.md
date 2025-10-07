@@ -42,10 +42,10 @@ Local simulation of upstream IDP (would be external in production):
 MCP resource server that implements the Model Context Protocol with delegated authentication.
 
 ### OAuth Metadata (Read-Only)
-Provided by `mcpAuthMetadataRouter`:
 
 - `GET /.well-known/oauth-authorization-server` - Returns metadata pointing to external auth server
   - Tells clients to use auth server at :3001
+  - Returns 503 if auth server is unavailable (degraded mode)
   - Read-only - no token issuance happens here
 
 ### MCP Resource Endpoints
@@ -61,8 +61,13 @@ Provided by `mcpAuthMetadataRouter`:
 
 All MCP endpoints require `Authorization: Bearer <token>` header. Tokens are validated by calling the auth server's `/introspect` endpoint.
 
+### Utility Endpoints
+- `GET /health` - Health check endpoint
+  - Returns status: `healthy` (auth available) or `degraded` (auth unavailable)
+  - Shows operational status of MCP, auth, and Redis services
+
 ### Static Assets
-- `GET /` - Splash page (HTML)
+- `GET /` - Splash page (HTML with degraded mode warning if auth unavailable)
 - `GET /mcp-logo.png` - MCP logo
 - `GET /styles.css` - Stylesheet
 

@@ -476,6 +476,17 @@ The script:
   - Google/GitHub OAuth
 - The mock IDP creates random user IDs for testing multi-user scenarios
 
+### "Authentication service unavailable" (HTTP 503)
+- **Cause**: Auth server is not running or not reachable
+- **What happens**: MCP server runs in degraded mode
+  - Splash page accessible with warning banner
+  - Health endpoint shows degraded status: `curl http://localhost:3232/health`
+  - Protected MCP endpoints return 503 with helpful error message
+- **Solution**:
+  - Start the auth server: `npm run dev` (starts both servers)
+  - Or start manually: `cd auth-server && npm run dev`
+  - Restart the MCP server to retry connection
+
 ### "Authentication flow fails"
 - **Cause**: Misconfiguration or servers not communicating
 - **Solution**:
