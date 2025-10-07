@@ -455,6 +455,13 @@ The script:
 - **Solution**:
   - Use the full URL with http:// prefix: `http://localhost:3232/mcp`
   - Ensure **both** auth and MCP servers are running (`npm run dev`)
+
+### "Wrong endpoint for SSE transport" or SSE connection fails to `/mcp`
+- **Cause**: Using SSE transport with Streamable HTTP endpoint
+- **Solution**:
+  - For **SSE transport** (legacy): Use `http://localhost:3232/sse`
+  - For **Streamable HTTP** (recommended): Use `http://localhost:3232/mcp`
+  - In MCP Inspector: Match transport type with the correct endpoint
   
 ### "Cannot connect to Docker daemon"
 - **Cause**: Docker/OrbStack not running
