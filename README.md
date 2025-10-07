@@ -41,7 +41,9 @@ npm run dev                 # Start both auth-server and mcp-server
 
 # 4. Test with Inspector
 npx -y @modelcontextprotocol/inspector
+
 # Connect to http://localhost:3232/mcp
+# (Make sure to include the http:// prefix!)
 ```
 
 For detailed instructions, see [Installation](#installation).
@@ -441,13 +443,12 @@ The script:
   - Check that Redis is running (`docker compose ps`)
   - Verify the token hasn't expired (tokens last 7 days)
 
-### "Cannot connect to MCP server"
-- **Cause**: Incorrect URL or missing path
+### "Cannot connect to MCP server" or "Connection Error - Check if your MCP server is running"
+- **Cause**: Incorrect URL format or servers not running
 - **Solution**:
-  - Use full URL: `http://localhost:3232/mcp` (not just `:3232`)
-  - Include the `/mcp` path for MCP endpoints
-  - Ensure you have a valid Bearer token in the Authorization header
-
+  - Use the full URL with http:// prefix: `http://localhost:3232/mcp`
+  - Ensure **both** auth and MCP servers are running (`npm run dev`)
+  
 ### "Cannot connect to Docker daemon"
 - **Cause**: Docker/OrbStack not running
 - **Solution**:

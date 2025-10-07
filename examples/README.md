@@ -24,20 +24,27 @@ Shell script demonstrating API interactions using curl.
 - Resource listing and reading
 - Prompt operations
 
-**Usage:**
+**Three-step workflow:**
 ```bash
 # Make executable
 chmod +x curl-examples.sh
 
-# Register client (step 1)
+# Step 1: Setup - Register OAuth client and get instructions
 ./curl-examples.sh
 
-# After getting token (via MCP Inspector)
+# Step 2: Create session - Get an access token (via Inspector or client.js), then:
 ./curl-examples.sh YOUR_ACCESS_TOKEN
+# → Initializes MCP session and displays session ID
 
-# With session ID
+# Step 3: Run examples - Use both access token and session ID:
 ./curl-examples.sh YOUR_ACCESS_TOKEN YOUR_SESSION_ID
+# → Demonstrates all MCP features (tools, resources, prompts)
 ```
+
+**Quick reference:**
+- Run `./curl-examples.sh --help` for detailed usage
+- Get access token from MCP Inspector or `node client.js`
+- Each step explains what to do next
 
 ### client.js
 
@@ -58,6 +65,20 @@ node client.js
 chmod +x client.js
 ./client.js
 ```
+
+**Note:** When you complete the OAuth flow in your browser, you'll be redirected to `http://localhost:8080/callback` which will show "site can't be reached". This is expected! Simply copy the authorization code from the URL in your browser's address bar (the long string after `code=`). The script will exchange this for an access token and display it for use with other tools.
+
+## Understanding OAuth Tokens
+
+**Authorization Code** vs **Access Token**:
+- **Authorization Code**: The temporary code you get from the browser redirect (e.g., `302a80e8...`)
+  - One-time use only
+  - Must be exchanged for an access token
+  - Expires quickly (usually within minutes)
+- **Access Token**: The actual bearer token for API authentication (e.g., `mcp_at_...`)
+  - Used in the `Authorization: Bearer` header
+  - Valid for 7 days
+  - What you need for `curl-examples.sh`
 
 ## Getting an Access Token
 

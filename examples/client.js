@@ -1,10 +1,20 @@
 #!/usr/bin/env node
 
 /**
- * Simple Node.js MCP Client Example
+ * Simple Node.js MCP Client Example - Manual Implementation
  *
- * This demonstrates how to interact with the MCP server programmatically.
- * It handles the OAuth flow and makes MCP requests.
+ * This demonstrates how to interact with the MCP server programmatically
+ * WITHOUT using the MCP SDK client. This is for educational purposes to
+ * show the underlying protocol mechanics.
+ *
+ * In production, you would use the MCP SDK client which handles:
+ * - SSE (Server-Sent Events) parsing
+ * - Session management and reconnection logic
+ * - Request/response correlation
+ * - Error handling and retries
+ *
+ * For SDK usage, see:
+ * @modelcontextprotocol/sdk/client/streamableHttp.js
  *
  * Prerequisites:
  * - Both servers running: npm run dev
@@ -18,6 +28,7 @@ const http = require('http');
 const https = require('https');
 const { URL } = require('url');
 const readline = require('readline');
+const crypto = require('crypto');
 
 // Configuration
 const AUTH_SERVER = 'http://localhost:3001';
@@ -64,11 +75,31 @@ function makeRequest(url, options = {}) {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
-        try {
-          const json = JSON.parse(data);
-          resolve({ status: res.statusCode, headers: res.headers, data: json });
-        } catch {
+        // Check if this is an SSE response
+        if (data.startsWith('event:') || data.includes('\ndata: ')) {
+          // Parse SSE format
+          const lines = data.split('\n');
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const json = JSON.parse(line.substring(6));
+                resolve({ status: res.statusCode, headers: res.headers, data: json });
+                return;
+              } catch {
+                // Continue to next line
+              }
+            }
+          }
+          // If no JSON found in SSE, return raw data
           resolve({ status: res.statusCode, headers: res.headers, data });
+        } else {
+          // Try to parse as regular JSON
+          try {
+            const json = JSON.parse(data);
+            resolve({ status: res.statusCode, headers: res.headers, data: json });
+          } catch {
+            resolve({ status: res.statusCode, headers: res.headers, data });
+          }
         }
       });
     });
@@ -89,23 +120,30 @@ function makeRequest(url, options = {}) {
 async function registerClient() {
   log.section('Registering OAuth Client');
 
-  const response = await makeRequest(`${AUTH_SERVER}/register`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      client_name: 'node-example-client',
-      redirect_uris: [REDIRECT_URI]
-    })
-  });
+  try {
+    const response = await makeRequest(`${AUTH_SERVER}/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        client_name: 'node-example-client',
+        redirect_uris: [REDIRECT_URI]
+      })
+    });
 
-  if (response.status === 200 || response.status === 201) {
-    log.success('Client registered successfully');
-    return {
-      clientId: response.data.client_id,
-      clientSecret: response.data.client_secret
-    };
-  } else {
-    throw new Error(`Registration failed: ${JSON.stringify(response.data)}`);
+    if (response.status === 200 || response.status === 201) {
+      log.success('Client registered successfully');
+      return {
+        clientId: response.data.client_id,
+        clientSecret: response.data.client_secret
+      };
+    } else {
+      throw new Error(`Registration failed (HTTP ${response.status}): ${JSON.stringify(response.data)}`);
+    }
+  } catch (error) {
+    if (error.code === 'ECONNREFUSED') {
+      throw new Error(`Cannot connect to auth server at ${AUTH_SERVER}. Make sure it's running (npm run dev).`);
+    }
+    throw error;
   }
 }
 
@@ -119,16 +157,19 @@ async function performOAuthFlow(clientId, clientSecret) {
   log.info('For this demo, we need you to manually complete the OAuth flow.');
   log.info('In a production app, this would be automated.\n');
 
-  // Generate PKCE challenge (simplified for demo)
-  const codeVerifier = Buffer.from(Math.random().toString()).toString('base64url');
-  const codeChallenge = Buffer.from(codeVerifier).toString('base64url');
+  // Generate PKCE challenge (proper S256 implementation)
+  const codeVerifier = crypto.randomBytes(32).toString('base64url');
+  const codeChallenge = crypto
+    .createHash('sha256')
+    .update(codeVerifier)
+    .digest('base64url');
 
   const authUrl = `${AUTH_SERVER}/authorize?` +
     `client_id=${clientId}&` +
     `redirect_uri=${encodeURIComponent(REDIRECT_URI)}&` +
     `response_type=code&` +
     `code_challenge=${codeChallenge}&` +
-    `code_challenge_method=plain&` +
+    `code_challenge_method=S256&` +
     `state=demo-state`;
 
   console.log('1. Open this URL in your browser:');
@@ -136,7 +177,11 @@ async function performOAuthFlow(clientId, clientSecret) {
 
   console.log('2. Complete the authentication flow');
   console.log('3. You\'ll be redirected to a URL like:');
-  console.log(`   ${REDIRECT_URI}?code=AUTHORIZATION_CODE&state=demo-state\n`);
+  console.log(`   ${REDIRECT_URI}?code=AUTHORIZATION_CODE&state=demo-state`);
+  console.log(`   ${colors.yellow}(You'll see "site can't be reached" - this is expected!)${colors.reset}\n`);
+
+  console.log('4. Copy the authorization code from the URL in your browser\'s address bar');
+  console.log('   The code is the long string after "code=" and before "&state="\n');
 
   // Get authorization code from user
   const rl = readline.createInterface({
@@ -145,7 +190,7 @@ async function performOAuthFlow(clientId, clientSecret) {
   });
 
   return new Promise((resolve) => {
-    rl.question('4. Paste the AUTHORIZATION_CODE here: ', async (code) => {
+    rl.question('5. Paste the AUTHORIZATION_CODE here: ', async (code) => {
       rl.close();
 
       // Exchange code for token
@@ -182,7 +227,8 @@ async function initializeMCPSession(accessToken) {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${accessToken}`,
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      'Accept': 'application/json, text/event-stream'
     },
     body: JSON.stringify({
       jsonrpc: '2.0',
@@ -201,8 +247,13 @@ async function initializeMCPSession(accessToken) {
 
   if (response.data.result) {
     log.success('MCP session initialized');
-    // In a real implementation, extract session ID from headers
-    return response.headers['mcp-session-id'] || 'demo-session-id';
+    const sessionId = response.headers['mcp-session-id'];
+    if (!sessionId) {
+      throw new Error('No session ID received in headers');
+    }
+    return sessionId;
+  } else if (response.data.error) {
+    throw new Error(`Initialization failed: ${response.data.error.message}`);
   } else {
     throw new Error(`Initialization failed: ${JSON.stringify(response.data)}`);
   }
@@ -221,7 +272,8 @@ async function demonstrateMCPFeatures(accessToken, sessionId) {
     headers: {
       'Authorization': `Bearer ${accessToken}`,
       'Mcp-Session-Id': sessionId,
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      'Accept': 'application/json, text/event-stream'
     },
     body: JSON.stringify({
       jsonrpc: '2.0',
@@ -235,6 +287,9 @@ async function demonstrateMCPFeatures(accessToken, sessionId) {
     toolsResponse.data.result.tools.forEach(tool => {
       console.log(`  - ${colors.cyan}${tool.name}${colors.reset}: ${tool.description}`);
     });
+  } else if (toolsResponse.data.error) {
+    log.error(`Failed to list tools: ${toolsResponse.data.error.message}`);
+    return;
   }
 
   // Call the echo tool
@@ -244,7 +299,8 @@ async function demonstrateMCPFeatures(accessToken, sessionId) {
     headers: {
       'Authorization': `Bearer ${accessToken}`,
       'Mcp-Session-Id': sessionId,
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      'Accept': 'application/json, text/event-stream'
     },
     body: JSON.stringify({
       jsonrpc: '2.0',
@@ -261,6 +317,8 @@ async function demonstrateMCPFeatures(accessToken, sessionId) {
 
   if (echoResponse.data.result) {
     console.log('Echo response:', echoResponse.data.result.content);
+  } else if (echoResponse.data.error) {
+    log.error(`Echo tool failed: ${echoResponse.data.error.message}`);
   }
 
   // Call the add tool
@@ -270,7 +328,8 @@ async function demonstrateMCPFeatures(accessToken, sessionId) {
     headers: {
       'Authorization': `Bearer ${accessToken}`,
       'Mcp-Session-Id': sessionId,
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      'Accept': 'application/json, text/event-stream'
     },
     body: JSON.stringify({
       jsonrpc: '2.0',
@@ -285,6 +344,8 @@ async function demonstrateMCPFeatures(accessToken, sessionId) {
 
   if (addResponse.data.result) {
     console.log('Add result:', addResponse.data.result.content);
+  } else if (addResponse.data.error) {
+    log.error(`Add tool failed: ${addResponse.data.error.message}`);
   }
 
   // List resources
@@ -294,7 +355,8 @@ async function demonstrateMCPFeatures(accessToken, sessionId) {
     headers: {
       'Authorization': `Bearer ${accessToken}`,
       'Mcp-Session-Id': sessionId,
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      'Accept': 'application/json, text/event-stream'
     },
     body: JSON.stringify({
       jsonrpc: '2.0',
@@ -308,6 +370,8 @@ async function demonstrateMCPFeatures(accessToken, sessionId) {
     resourcesResponse.data.result.resources.slice(0, 5).forEach(resource => {
       console.log(`  - ${colors.cyan}${resource.uri}${colors.reset}: ${resource.name}`);
     });
+  } else if (resourcesResponse.data.error) {
+    log.error(`Failed to list resources: ${resourcesResponse.data.error.message}`);
   }
 }
 
@@ -335,8 +399,28 @@ async function main() {
 
     log.success('\nExample completed successfully!');
 
+    // Show how to use curl-examples.sh as an alternative
+    console.log(`\n${colors.bright}${colors.cyan}Try curl-examples.sh (alternative to this script):${colors.reset}`);
+    console.log('─'.repeat(50));
+    console.log(`\n${colors.green}Your credentials:${colors.reset}`);
+    console.log(`  Access Token: ${colors.yellow}${accessToken}${colors.reset}`);
+    console.log(`  Session ID:   ${colors.yellow}${sessionId}${colors.reset}`);
+    console.log(`\n${colors.cyan}Create a new session with curl:${colors.reset}`);
+    console.log(`  ./examples/curl-examples.sh ${accessToken}`);
+    console.log(`\n${colors.cyan}Reuse this session with curl:${colors.reset}`);
+    console.log(`  ./examples/curl-examples.sh ${accessToken} ${sessionId}\n`);
+
   } catch (error) {
-    log.error(`Error: ${error.message}`);
+    if (error.code === 'ECONNREFUSED') {
+      log.error('Connection refused - Is the auth server running?');
+      log.error(`Could not connect to ${error.address || 'server'}:${error.port || 'unknown'}`);
+      console.log('\nMake sure to start the servers first:');
+      console.log('  npm run dev');
+    } else if (error.message) {
+      log.error(`Error: ${error.message}`);
+    } else {
+      log.error(`Error: ${JSON.stringify(error)}`);
+    }
     process.exit(1);
   }
 }

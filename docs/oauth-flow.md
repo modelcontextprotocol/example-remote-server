@@ -194,18 +194,6 @@ This ensures only the client that initiated the flow can exchange the code, even
 
 ---
 
-## Architecture Benefits
-
-The separate server architecture provides:
-
-1. **Standards Compliance**: Follows OAuth 2.0 best practices for resource/authorization server separation
-2. **Flexibility**: Auth server can be replaced with Auth0, Okta, or other providers
-3. **Scalability**: Auth and MCP servers can scale independently based on load
-4. **Security**: Token validation via introspection endpoint (RFC 7662)
-5. **Maintainability**: Clear separation of authentication and business logic
-
----
-
 ## References
 
 - [RFC 6749: OAuth 2.0 Framework](https://datatracker.ietf.org/doc/html/rfc6749)

@@ -1,13 +1,27 @@
 #!/bin/bash
 
 # =============================================================================
-# MCP Server API Examples using curl
+# MCP Server API Examples using curl - Manual Implementation
 # =============================================================================
 #
-# This script demonstrates how to interact with the MCP server using curl.
+# This script demonstrates how to interact with the MCP server using curl
+# WITHOUT using the MCP SDK. This is for educational purposes to show the
+# underlying protocol mechanics.
+#
+# In production, you would use the MCP SDK client which handles:
+# - SSE (Server-Sent Events) parsing
+# - Session management and reconnection logic
+# - Request/response correlation
+# - Error handling and retries
+#
 # Before running, ensure both servers are running: npm run dev
 #
-# Usage: ./curl-examples.sh [access_token]
+# Three-step workflow:
+#   1. ./curl-examples.sh                    → Register OAuth client, get setup instructions
+#   2. ./curl-examples.sh <access_token>     → Initialize MCP session, get session ID
+#   3. ./curl-examples.sh <token> <session>  → Run all MCP examples (tools, resources, prompts)
+#
+# Run with --help for detailed usage information
 # =============================================================================
 
 # Configuration
@@ -43,6 +57,19 @@ print_info() {
     echo -e "${YELLOW}ℹ $1${NC}"
 }
 
+# Parse SSE response and extract JSON data
+parse_sse_response() {
+    local RESPONSE="$1"
+    # Check if response is in SSE format
+    if echo "$RESPONSE" | grep -q "^event:"; then
+        # Extract JSON from SSE format (data: line)
+        echo "$RESPONSE" | grep "^data: " | sed 's/^data: //'
+    else
+        # Return as-is if not SSE format
+        echo "$RESPONSE"
+    fi
+}
+
 # =============================================================================
 # OAuth Client Registration
 # =============================================================================
@@ -64,8 +91,6 @@ register_client() {
         print_success "Client registered successfully"
         echo "Client ID: $CLIENT_ID"
         echo "Client Secret: $CLIENT_SECRET"
-        echo
-        echo "Save these credentials - you'll need them for the OAuth flow"
     else
         print_error "Failed to register client"
         echo "Response: $RESPONSE"
@@ -80,17 +105,16 @@ register_client() {
 initialize_session() {
     local ACCESS_TOKEN=$1
 
-    print_section "Initializing MCP Session"
-
     if [ -z "$ACCESS_TOKEN" ]; then
         print_error "Access token required"
         print_info "Get a token using MCP Inspector or implement OAuth flow"
         return 1
     fi
 
-    RESPONSE=$(curl -s -X POST "$MCP_SERVER/mcp" \
+    RESPONSE=$(curl -s -i -X POST "$MCP_SERVER/mcp" \
         -H "Authorization: Bearer $ACCESS_TOKEN" \
         -H "Content-Type: application/json" \
+        -H "Accept: application/json, text/event-stream" \
         -d '{
             "jsonrpc": "2.0",
             "id": "init",
@@ -105,18 +129,32 @@ initialize_session() {
             }
         }')
 
-    # Extract session ID from response headers (would need -i flag)
-    # For demonstration, we'll parse from response
-    echo "Response: $RESPONSE"
+    # Extract session ID from response headers
+    SESSION_ID=$(echo "$RESPONSE" | grep -i "^mcp-session-id:" | cut -d' ' -f2 | tr -d '\r\n')
+
+    # Extract body from response (SSE format)
+    BODY=$(echo "$RESPONSE" | sed -n '/^$/,$p' | tail -n +2)
+
+    # Parse SSE response if present
+    if echo "$BODY" | grep -q "^event:"; then
+        # Extract JSON from SSE format (data: line)
+        JSON_DATA=$(echo "$BODY" | grep "^data: " | sed 's/^data: //')
+    else
+        JSON_DATA="$BODY"
+    fi
 
     # Check for error
-    if echo "$RESPONSE" | grep -q "error"; then
+    if echo "$JSON_DATA" | grep -q "error"; then
         print_error "Failed to initialize session"
+        echo "$JSON_DATA" >&2
         return 1
-    else
-        print_success "Session initialized"
-        print_info "Save the Mcp-Session-Id header for subsequent requests"
+    elif [ -n "$SESSION_ID" ]; then
+        # Return session ID on stdout (for capture by caller)
+        echo "$SESSION_ID"
         return 0
+    else
+        print_error "No session ID received"
+        return 1
     fi
 }
 
@@ -130,15 +168,19 @@ list_tools() {
 
     print_section "Listing Available Tools"
 
-    curl -s -X POST "$MCP_SERVER/mcp" \
+    RESPONSE=$(curl -s -X POST "$MCP_SERVER/mcp" \
         -H "Authorization: Bearer $ACCESS_TOKEN" \
         -H "Mcp-Session-Id: $SESSION_ID" \
         -H "Content-Type: application/json" \
+        -H "Accept: application/json, text/event-stream" \
         -d '{
             "jsonrpc": "2.0",
             "id": "list-tools",
             "method": "tools/list"
-        }' | python3 -m json.tool
+        }')
+
+    # Parse SSE response if needed and pretty print
+    parse_sse_response "$RESPONSE" | python3 -m json.tool
 }
 
 call_echo_tool() {
@@ -148,10 +190,11 @@ call_echo_tool() {
 
     print_section "Calling Echo Tool"
 
-    curl -s -X POST "$MCP_SERVER/mcp" \
+    RESPONSE=$(curl -s -X POST "$MCP_SERVER/mcp" \
         -H "Authorization: Bearer $ACCESS_TOKEN" \
         -H "Mcp-Session-Id: $SESSION_ID" \
         -H "Content-Type: application/json" \
+        -H "Accept: application/json, text/event-stream" \
         -d "{
             \"jsonrpc\": \"2.0\",
             \"id\": \"echo-1\",
@@ -162,7 +205,10 @@ call_echo_tool() {
                     \"message\": \"$MESSAGE\"
                 }
             }
-        }" | python3 -m json.tool
+        }")
+
+    # Parse SSE response if needed and pretty print
+    parse_sse_response "$RESPONSE" | python3 -m json.tool
 }
 
 call_add_tool() {
@@ -173,10 +219,11 @@ call_add_tool() {
 
     print_section "Calling Add Tool"
 
-    curl -s -X POST "$MCP_SERVER/mcp" \
+    RESPONSE=$(curl -s -X POST "$MCP_SERVER/mcp" \
         -H "Authorization: Bearer $ACCESS_TOKEN" \
         -H "Mcp-Session-Id: $SESSION_ID" \
         -H "Content-Type: application/json" \
+        -H "Accept: application/json, text/event-stream" \
         -d "{
             \"jsonrpc\": \"2.0\",
             \"id\": \"add-1\",
@@ -188,7 +235,10 @@ call_add_tool() {
                     \"b\": $B
                 }
             }
-        }" | python3 -m json.tool
+        }")
+
+    # Parse SSE response if needed and pretty print
+    parse_sse_response "$RESPONSE" | python3 -m json.tool
 }
 
 # =============================================================================
@@ -201,15 +251,19 @@ list_resources() {
 
     print_section "Listing Resources (First Page)"
 
-    curl -s -X POST "$MCP_SERVER/mcp" \
+    RESPONSE=$(curl -s -X POST "$MCP_SERVER/mcp" \
         -H "Authorization: Bearer $ACCESS_TOKEN" \
         -H "Mcp-Session-Id: $SESSION_ID" \
         -H "Content-Type: application/json" \
+        -H "Accept: application/json, text/event-stream" \
         -d '{
             "jsonrpc": "2.0",
             "id": "list-resources",
             "method": "resources/list"
-        }' | python3 -m json.tool
+        }')
+
+    # Parse SSE response if needed and pretty print
+    parse_sse_response "$RESPONSE" | python3 -m json.tool
 }
 
 read_resource() {
@@ -219,10 +273,11 @@ read_resource() {
 
     print_section "Reading Resource: $RESOURCE_URI"
 
-    curl -s -X POST "$MCP_SERVER/mcp" \
+    RESPONSE=$(curl -s -X POST "$MCP_SERVER/mcp" \
         -H "Authorization: Bearer $ACCESS_TOKEN" \
         -H "Mcp-Session-Id: $SESSION_ID" \
         -H "Content-Type: application/json" \
+        -H "Accept: application/json, text/event-stream" \
         -d "{
             \"jsonrpc\": \"2.0\",
             \"id\": \"read-resource\",
@@ -230,7 +285,10 @@ read_resource() {
             \"params\": {
                 \"uri\": \"$RESOURCE_URI\"
             }
-        }" | python3 -m json.tool
+        }")
+
+    # Parse SSE response if needed and pretty print
+    parse_sse_response "$RESPONSE" | python3 -m json.tool
 }
 
 # =============================================================================
@@ -243,15 +301,19 @@ list_prompts() {
 
     print_section "Listing Available Prompts"
 
-    curl -s -X POST "$MCP_SERVER/mcp" \
+    RESPONSE=$(curl -s -X POST "$MCP_SERVER/mcp" \
         -H "Authorization: Bearer $ACCESS_TOKEN" \
         -H "Mcp-Session-Id: $SESSION_ID" \
         -H "Content-Type: application/json" \
+        -H "Accept: application/json, text/event-stream" \
         -d '{
             "jsonrpc": "2.0",
             "id": "list-prompts",
             "method": "prompts/list"
-        }' | python3 -m json.tool
+        }')
+
+    # Parse SSE response if needed and pretty print
+    parse_sse_response "$RESPONSE" | python3 -m json.tool
 }
 
 get_prompt() {
@@ -261,10 +323,11 @@ get_prompt() {
 
     print_section "Getting Prompt: $PROMPT_NAME"
 
-    curl -s -X POST "$MCP_SERVER/mcp" \
+    RESPONSE=$(curl -s -X POST "$MCP_SERVER/mcp" \
         -H "Authorization: Bearer $ACCESS_TOKEN" \
         -H "Mcp-Session-Id: $SESSION_ID" \
         -H "Content-Type: application/json" \
+        -H "Accept: application/json, text/event-stream" \
         -d "{
             \"jsonrpc\": \"2.0\",
             \"id\": \"get-prompt\",
@@ -272,14 +335,46 @@ get_prompt() {
             \"params\": {
                 \"name\": \"$PROMPT_NAME\"
             }
-        }" | python3 -m json.tool
+        }")
+
+    # Parse SSE response if needed and pretty print
+    parse_sse_response "$RESPONSE" | python3 -m json.tool
 }
 
 # =============================================================================
 # Main Script
 # =============================================================================
 
+show_usage() {
+    echo -e "${BLUE}MCP Server API Examples - Usage${NC}"
+    echo "================================="
+    echo
+    echo "This script demonstrates MCP API interactions in three steps:"
+    echo
+    echo -e "  ${GREEN}Step 1: Register OAuth client${NC}"
+    echo "    ./curl-examples.sh"
+    echo "    → Registers a client and shows how to get an access token"
+    echo
+    echo -e "  ${GREEN}Step 2: Initialize MCP session${NC}"
+    echo "    ./curl-examples.sh <access_token>"
+    echo "    → Creates an MCP session and returns a session ID"
+    echo
+    echo -e "  ${GREEN}Step 3: Run MCP examples${NC}"
+    echo "    ./curl-examples.sh <access_token> <session_id>"
+    echo "    → Demonstrates tools, resources, and prompts"
+    echo
+    echo "Options:"
+    echo "  --help, -h    Show this help message"
+    echo
+}
+
 main() {
+    # Check for help flag
+    if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
+        show_usage
+        exit 0
+    fi
+
     echo -e "${BLUE}MCP Server API Examples${NC}"
     echo "================================="
 
@@ -288,26 +383,46 @@ main() {
     SESSION_ID=$2
 
     if [ -z "$ACCESS_TOKEN" ]; then
-        print_info "No access token provided"
-        print_info "Usage: $0 <access_token> [session_id]"
+        print_section "Getting Started"
+        print_info "This script requires an OAuth access token to demonstrate MCP operations."
+        print_info "Since you don't have one yet, let's help you get started!"
         echo
-        print_section "Step 1: Register OAuth Client"
+        print_info "First, we'll register an OAuth client for you..."
+        echo
         register_client
         echo
-        print_info "To continue, you need to:"
-        print_info "1. Complete OAuth flow to get an access token"
-        print_info "2. Run: $0 <your_access_token>"
-        print_info ""
-        print_info "Use MCP Inspector for easy OAuth flow:"
-        print_info "npx -y @modelcontextprotocol/inspector"
-        print_info "Connect to: http://localhost:3232/mcp"
+        print_section "Next Steps"
+        print_info "Now you need to get an access token. You have two options:"
+        echo
+        print_info "Option 1: Use MCP Inspector (recommended):"
+        print_info "  npx -y @modelcontextprotocol/inspector"
+        print_info "  Connect to: http://localhost:3232/mcp"
+        print_info "  Complete the OAuth flow in the Auth tab"
+        echo
+        print_info "Option 2: Use the client.js example:"
+        print_info "  node examples/client.js"
+        echo
+        print_info "Once you have an access token, run:"
+        print_info "  $0 <your_access_token>"
         exit 0
     fi
 
-    # If we have a token, demonstrate API calls
+    # If we have a token but no session, initialize session
     if [ -z "$SESSION_ID" ]; then
-        initialize_session "$ACCESS_TOKEN"
-        print_info "Rerun with: $0 $ACCESS_TOKEN <session_id>"
+        print_section "Initializing MCP Session"
+        RETURNED_SESSION_ID=$(initialize_session "$ACCESS_TOKEN")
+
+        if [ $? -eq 0 ] && [ -n "$RETURNED_SESSION_ID" ]; then
+            echo
+            print_success "MCP session initialized successfully"
+            print_info "Session ID: $RETURNED_SESSION_ID"
+            echo
+            print_info "To run all MCP examples (tools, resources, prompts), use:"
+            echo -e "  ${CYAN}$0 $ACCESS_TOKEN $RETURNED_SESSION_ID${NC}"
+            echo
+            print_info "For help:"
+            echo -e "  ${CYAN}$0 --help${NC}"
+        fi
         exit 0
     fi
 

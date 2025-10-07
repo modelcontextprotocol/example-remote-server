@@ -2,7 +2,7 @@
 
 Complete listing of all endpoints provided by each server in the architecture.
 
-## Auth Server (Port 3001)
+## Auth Server
 
 Standalone OAuth 2.0 authorization server that handles authentication and token management.
 
@@ -37,7 +37,7 @@ Local simulation of upstream IDP (would be external in production):
 
 ---
 
-## MCP Server (Port 3232)
+## MCP Server
 
 MCP resource server that implements the Model Context Protocol with delegated authentication.
 
