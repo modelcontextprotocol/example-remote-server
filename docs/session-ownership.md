@@ -76,7 +76,7 @@ When an MCP server starts handling a session, it subscribes to the channel. When
 
 ## Implementation
 
-### Core Functions (src/services/redisTransport.ts)
+### Core Functions (mcp-server/src/services/redisTransport.ts)
 
 ```typescript
 export async function setSessionOwner(sessionId: string, userId: string): Promise<void>
@@ -135,8 +135,11 @@ redis-cli MONITOR | grep "session:"
 ## Testing
 
 ```bash
-npm test -- --testNamePattern="User Session Isolation"
-npm test -- --testNamePattern="session ownership"
+# Run from mcp-server directory to test session isolation
+cd mcp-server && npm test -- --testNamePattern="User Session Isolation"
+
+# Run from mcp-server directory to test session ownership
+cd mcp-server && npm test -- --testNamePattern="Session Ownership"
 ```
 
 ## References
