@@ -12,15 +12,37 @@ This repository provides a complete implementation of an MCP server that:
 
 The [Model Context Protocol](https://modelcontextprotocol.io) is an open standard that enables seamless integration between AI applications and external data sources, tools, and services.
 
-## Why OAuth for MCP?
+## Table of Contents
 
-MCP servers often handle sensitive operations and data. This implementation shows how to:
-- Authenticate users before granting access to MCP resources
-- Integrate with existing identity providers (Auth0, Okta, Google)
-- Implement user session isolation in multi-tenant environments
-- Scale horizontally while maintaining security
+- [Getting Started](#getting-started)
+  - [Quick Start](#quick-start)
+  - [Installation](#installation)
+  - [Testing](#testing)
+  - [Repository Structure](#repository-structure)
+- [Understanding the System](#understanding-the-system)
+  - [Features](#features)
+  - [Authentication & Authorization](#authentication--authorization)
+  - [Configuration](#configuration)
+  - [Customizing for Your Use Case](#customizing-for-your-use-case)
+- [Development & Operations](#development--operations)
+  - [Development](#development)
+  - [Common Issues & Solutions](#common-issues--solutions)
+  - [Technical Details](#technical-details)
+  - [Monitoring & Debugging](#monitoring--debugging)
+- [Reference](#reference)
+  - [API Reference](#api-reference)
+  - [Security](#security)
+  - [External Resources](#external-resources)
+- [Contributing](#contributing)
+  - [License](#license)
+
+---
+
+# Getting Started
 
 ## Quick Start
+
+*For detailed installation instructions, see [Installation](#installation) below.*
 
 Get the server running in 5 minutes:
 
@@ -45,185 +67,6 @@ npx -y @modelcontextprotocol/inspector
 # Connect to http://localhost:3232/mcp
 # (Make sure to include the http:// prefix!)
 ```
-
-For detailed instructions, see [Installation](#installation).
-
-## Repository Structure
-
-This repository demonstrates a production-ready MCP deployment pattern with separate authorization and resource servers:
-
-```
-auth-server/             # OAuth 2.0 authorization server (demo only - replace in production)
-  └── src/               # Authorization endpoints and token management
-
-mcp-server/              # MCP resource server (customize tools/resources/prompts)
-  └── src/               # MCP protocol implementation with external auth
-
-scripts/                 # Testing and deployment scripts
-docs/                    # Architecture and API documentation
-examples/                # Example code and usage patterns
-```
-
-The architecture separates authentication concerns from MCP functionality, allowing you to integrate with commercial OAuth providers (Auth0, Okta, etc.).
-
-## Customizing for Your Use Case
-
-This is a reference implementation with demo tools, resources, and prompts. To adapt it for production:
-- **Replace MCP features:** See [Customization Guide](docs/customization-guide.md) for replacing demo functionality with your own
-- **Integrate OAuth provider:** See [OAuth Architecture Patterns](docs/oauth-architecture-patterns.md) for production authentication setup
-
-## Usage Examples
-
-### Making Your First MCP Request
-
-Once the servers are running, here's how to interact with them:
-
-#### 1. Register an OAuth Client
-
-```bash
-# Register your application with the auth server
-curl -X POST http://localhost:3001/register \
-  -H "Content-Type: application/json" \
-  -d '{
-    "client_name": "my-mcp-client",
-    "redirect_uris": ["http://localhost:3000/callback"]
-  }'
-
-# Response:
-# {
-#   "client_id": "abc123...",
-#   "client_secret": "xyz789...",
-#   "client_name": "my-mcp-client"
-# }
-```
-
-#### 2. Get an Access Token
-
-For testing, use the MCP Inspector which handles the OAuth flow automatically. For programmatic access, implement the OAuth 2.0 authorization code flow (see [docs/oauth-flow.md](docs/oauth-flow.md)).
-
-#### 3. Initialize MCP Session
-
-```bash
-# Initialize a new MCP session
-curl -X POST http://localhost:3232/mcp \
-  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "jsonrpc": "2.0",
-    "id": "1",
-    "method": "initialize",
-    "params": {
-      "protocolVersion": "2024-11-05",
-      "capabilities": {},
-      "clientInfo": {
-        "name": "my-client",
-        "version": "1.0"
-      }
-    }
-  }'
-
-# Response includes session ID for subsequent requests
-```
-
-#### 4. Use MCP Features
-
-```bash
-# List available tools
-curl -X POST http://localhost:3232/mcp \
-  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
-  -H "Mcp-Session-Id: YOUR_SESSION_ID" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "jsonrpc": "2.0",
-    "id": "2",
-    "method": "tools/list"
-  }'
-
-# Call a tool (echo example)
-curl -X POST http://localhost:3232/mcp \
-  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
-  -H "Mcp-Session-Id: YOUR_SESSION_ID" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "jsonrpc": "2.0",
-    "id": "3",
-    "method": "tools/call",
-    "params": {
-      "name": "echo",
-      "arguments": {
-        "message": "Hello, MCP!"
-      }
-    }
-  }'
-```
-
-For more examples, see the [examples/](examples/) directory.
-
-## Understanding the Flow
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant Client as Your App
-    participant Auth as Auth Server (:3001)
-    participant MCP as MCP Server (:3232)
-
-    User->>Client: Wants to use MCP
-    Client->>Auth: 1. Register & OAuth flow
-    Auth->>User: 2. Login page
-    User->>Auth: 3. Authenticate
-    Auth->>Client: 4. Access token
-    Client->>MCP: 5. MCP request + token
-    MCP->>Auth: 6. Validate token
-    Auth->>MCP: 7. Token valid ✓
-    MCP->>Client: 8. MCP response
-    Client->>User: 9. Results
-```
-
-The auth server is separate so you can easily replace it with Auth0, Okta, or any OAuth provider. See [docs/oauth-architecture-patterns.md](docs/oauth-architecture-patterns.md) for integration guidance.
-
-## Table of Contents
-
-- [Quick Start](#quick-start)
-- [Features](#features)
-- [Installation](#installation)
-- [Configuration](#configuration)
-- [Architecture](#architecture)
-- [Development](#development)
-  - [Testing with MCP Inspector](#testing-with-mcp-inspector)
-  - [Automated End-to-End Testing](#automated-end-to-end-testing)
-- [Common Issues & Solutions](#common-issues--solutions)
-- [Technical Details](#technical-details)
-- [API Reference](#api-reference)
-- [Security](#security)
-- [Monitoring & Debugging](#monitoring--debugging)
-- [Contributing](#contributing)
-
-## Features
-
-### MCP Protocol Features
-- **[Tools](https://modelcontextprotocol.io/docs/concepts/tools)**: 7 demonstration tools including echo, add, long-running operations, LLM sampling, image handling, annotations, and resource references
-- **[Resources](https://modelcontextprotocol.io/docs/concepts/resources)**: 100 example resources with pagination, templates, and subscription support
-- **[Prompts](https://modelcontextprotocol.io/docs/concepts/prompts)**: Simple and complex prompts with argument support and resource embedding
-- **[Sampling](https://modelcontextprotocol.io/docs/concepts/sampling)**: Integration with MCP sampling for LLM interactions
-- **Completions**: Auto-completion support for prompt arguments
-- **Logging**: Multi-level logging with configurable verbosity
-- **Notifications**: Progress updates, resource updates, and stderr messages
-
-### Transport & Infrastructure
-- **[Streamable HTTP](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports#streamable-http)**: Full implementation with GET/POST/DELETE support
-- **[SSE Transport](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports#server-sent-events)**: Backwards-compatible Server-Sent Events
-- **Redis Integration**: Pub/sub message routing and session state management
-- **Session Management**: 5-minute TTL with automatic cleanup
-- **Horizontal Scaling**: Any instance can handle any request
-
-### Authentication & Security
-- **[OAuth 2.0](https://modelcontextprotocol.io/specification/2025-03-26/basic/authorization)**: Complete authorization flow with PKCE support
-- **Separate Auth Server**: Demonstrates integration with external OAuth providers
-- **Token Introspection**: Validates tokens via [RFC 7662](https://datatracker.ietf.org/doc/html/rfc7662)
-- **Session Ownership**: User isolation and access control
-- **Security Headers**: CSP, HSTS, X-Frame-Options, and more
-- **Bearer Token Auth**: Middleware for protected endpoints
 
 ## Installation
 
@@ -282,6 +125,126 @@ npm run dev:auth-server  # Auth server on http://localhost:3001
 npm run dev:mcp-server   # MCP server on http://localhost:3232
 ```
 
+## Testing
+
+### With MCP Inspector (Recommended)
+
+The easiest way to test the server:
+
+```bash
+# 1. Ensure servers are running (npm run dev)
+
+# 2. Launch Inspector
+npx -y @modelcontextprotocol/inspector
+
+# 3. Connect to http://localhost:3232/mcp
+# 4. Complete OAuth flow in the Auth tab
+# 5. Test tools, resources, and prompts interactively
+```
+
+### With Example Scripts
+
+The `examples/` directory contains runnable code demonstrating OAuth and MCP interactions:
+
+- **`client.js`**: Complete Node.js example with OAuth flow and MCP operations
+- **`curl-examples.sh`**: Shell script showing raw HTTP/curl usage
+
+See [examples/README.md](examples/README.md) for detailed usage.
+
+## Repository Structure
+
+This repository demonstrates a production-ready MCP deployment pattern with separate authorization and resource servers:
+
+```
+auth-server/             # OAuth 2.0 authorization server (demo only - replace in production)
+  └── src/               # Authorization endpoints and token management
+
+mcp-server/              # MCP resource server (customize tools/resources/prompts)
+  └── src/               # MCP protocol implementation with external auth
+
+scripts/                 # Testing and deployment scripts
+docs/                    # Architecture and API documentation
+examples/                # Example code and usage patterns
+```
+
+The architecture separates authentication concerns from MCP functionality, allowing you to integrate with commercial OAuth providers (Auth0, Okta, etc.).
+
+---
+
+# Understanding the System
+
+## Features
+
+### MCP Protocol Features
+- **[Tools](https://modelcontextprotocol.io/docs/concepts/tools)**: 7 demonstration tools including echo, add, long-running operations, LLM sampling, image handling, annotations, and resource references
+- **[Resources](https://modelcontextprotocol.io/docs/concepts/resources)**: 100 example resources with pagination, templates, and subscription support
+- **[Prompts](https://modelcontextprotocol.io/docs/concepts/prompts)**: Simple and complex prompts with argument support and resource embedding
+- **[Sampling](https://modelcontextprotocol.io/docs/concepts/sampling)**: Integration with MCP sampling for LLM interactions
+- **Completions**: Auto-completion support for prompt arguments
+- **Logging**: Multi-level logging with configurable verbosity
+- **Notifications**: Progress updates, resource updates, and stderr messages
+
+### Transport & Infrastructure
+- **[Streamable HTTP](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports#streamable-http)**: Full implementation with GET/POST/DELETE support
+- **[SSE Transport](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports#server-sent-events)**: Backwards-compatible Server-Sent Events
+- **Redis Integration**: Pub/sub message routing and session state management
+- **Session Management**: 5-minute TTL with automatic cleanup
+- **Horizontal Scaling**: Any instance can handle any request
+
+### Authentication & Security
+- **[OAuth 2.0](https://modelcontextprotocol.io/specification/2025-03-26/basic/authorization)**: Complete authorization flow with PKCE support
+- **Separate Auth Server**: Demonstrates integration with external OAuth providers
+- **Token Introspection**: Validates tokens via [RFC 7662](https://datatracker.ietf.org/doc/html/rfc7662)
+- **Session Ownership**: User isolation and access control
+- **Security Headers**: CSP, HSTS, X-Frame-Options, and more
+- **Bearer Token Auth**: Middleware for protected endpoints
+
+## Authentication & Authorization
+
+Per the [MCP Authorization specification](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization), this implementation demonstrates a production-ready pattern with separate authorization and resource servers.
+
+### Why OAuth for MCP?
+
+MCP servers often handle sensitive operations and data. This implementation shows how to:
+- Authenticate users before granting access to MCP resources
+- Integrate with existing identity providers (Auth0, Okta, Google)
+- Implement user session isolation in multi-tenant environments
+- Scale horizontally while maintaining security
+
+### Authentication Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Client as Your App
+    participant Auth as Auth Server (:3001)
+    participant MCP as MCP Server (:3232)
+
+    User->>Client: Wants to use MCP
+    Client->>Auth: 1. Register & OAuth flow
+    Auth->>User: 2. Login page
+    User->>Auth: 3. Authenticate
+    Auth->>Client: 4. Access token
+    Client->>MCP: 5. MCP request + token
+    MCP->>Auth: 6. Validate token
+    Auth->>MCP: 7. Token valid ✓
+    MCP->>Client: 8. MCP response
+    Client->>User: 9. Results
+```
+
+This architecture pattern:
+- **Separates concerns**: Auth server handles OAuth, MCP server handles protocol
+- **Enables integration**: Can replace auth server with Auth0, Okta, etc.
+- **Scales independently**: Auth and MCP servers can scale based on their load
+- **Follows standards**: Uses OAuth 2.0 and token introspection (RFC 7662)
+
+### Mock Identity Provider
+
+The `/mock-upstream-idp` endpoints simulate what a real identity provider (Google, GitHub, corporate SSO) would do. In production, users would be redirected to their actual identity provider for login. This mock implementation helps you test the complete flow locally without external dependencies.
+
+For detailed OAuth flow analysis including data storage and TTLs, see [docs/oauth-flow.md](docs/oauth-flow.md).
+For alternative patterns like embedded OAuth, see [docs/oauth-architecture-patterns.md](docs/oauth-architecture-patterns.md).
+
 ## Configuration
 
 Each server has its own `.env` file:
@@ -302,82 +265,15 @@ AUTH_SERVER_URL=http://localhost:3001  # External auth server URL
 REDIS_URL=redis://localhost:6379       # Redis connection
 ```
 
-## Architecture
+## Customizing for Your Use Case
 
-Per the [MCP Authorization specification](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization), this implementation demonstrates a production-ready pattern with separate authorization and resource servers.
+This is a reference implementation with demo tools, resources, and prompts. To adapt it for production:
+- **Replace MCP features:** See [Customization Guide](docs/customization-guide.md) for replacing demo functionality with your own
+- **Integrate OAuth provider:** See [OAuth Architecture Patterns](docs/oauth-architecture-patterns.md) for production authentication setup
 
-### System Architecture
+---
 
-```mermaid
-graph TD
-    Client["MCP Client<br/>(Inspector)"]
-    MCP["MCP Server<br/>(port 3232)<br/>Resource Server"]
-    Auth["Auth Server<br/>(port 3001)<br/>OAuth Server"]
-
-    Client <-->|"1. Discover metadata"| MCP
-    Client <-->|"2. OAuth flow<br/>(register, authorize, token)"| Auth
-    Client <-->|"3. Use tokens for MCP resources"| MCP
-    MCP <-->|"Token validation<br/>(introspect)"| Auth
-```
-
-This architecture pattern:
-- **Separates concerns**: Auth server handles OAuth, MCP server handles protocol
-- **Enables integration**: Can replace auth server with Auth0, Okta, etc.
-- **Scales independently**: Auth and MCP servers can scale based on their load
-- **Follows standards**: Uses OAuth 2.0 and token introspection (RFC 7662)
-
-For alternative patterns like embedded OAuth, see [docs/oauth-architecture-patterns.md](docs/oauth-architecture-patterns.md).
-
-### OAuth Flow
-
-The implementation uses OAuth 2.1 with PKCE. For detailed flow analysis including data storage, TTLs, and implementation details, see [docs/oauth-flow.md](docs/oauth-flow.md).
-
-### Understanding the Mock Identity Provider
-
-The `/mock-upstream-idp` endpoints simulate what a real identity provider (Google, GitHub, corporate SSO) would do. In production, users would be redirected to their actual identity provider for login. This mock implementation helps you test the complete flow locally without external dependencies.
-
-### Project Structure
-```
-├── auth-server/                 # OAuth authorization server
-│   ├── src/
-│   │   ├── index.ts             # Auth server entry point
-│   │   ├── auth/
-│   │   │   ├── provider.ts      # FeatureReferenceAuthProvider
-│   │   │   └── auth-core.ts     # Token generation, PKCE
-│   │   ├── services/            # Auth services, redis-auth
-│   │   ├── handlers/            # Mock upstream auth
-│   │   └── utils/logger.ts      # Structured logging
-│   ├── package.json
-│   ├── tsconfig.json
-│   └── .env
-│
-├── mcp-server/                  # MCP resource server
-│   ├── src/
-│   │   ├── index.ts             # MCP server entry point
-│   │   ├── auth/
-│   │   │   ├── external-verifier.ts  # Token introspection
-│   │   │   └── auth-core.ts
-│   │   ├── services/            # MCP server, redisTransport
-│   │   ├── handlers/            # SHTTP, SSE handlers
-│   │   └── utils/logger.ts
-│   ├── package.json
-│   ├── tsconfig.json
-│   └── .env
-│
-├── scripts/                     # Testing and deployment
-│   └── test-e2e.sh              # End-to-end OAuth + MCP verification
-├── docs/
-│   ├── customization-guide.md   # How to adapt this for your use case
-│   ├── endpoints.md             # API endpoint reference
-│   ├── oauth-flow.md            # OAuth flow documentation
-│   ├── oauth-architecture-patterns.md  # OAuth integration guidance
-│   └── session-ownership.md     # Session management details
-├── examples/                    # Example code and usage patterns
-│   ├── client.js                # Node.js client example
-│   └── curl-examples.sh         # Shell script with curl examples
-├── package.json                 # Root workspace configuration
-└── docker-compose.yml           # Redis service
-```
+# Development & Operations
 
 ## Development
 
@@ -402,28 +298,6 @@ npm test                    # All unit tests
 npm run lint                # Lint all code
 npm run typecheck           # Typecheck all code
 npm run test:e2e            # End-to-end test
-```
-
-### Testing with MCP Inspector
-
-The MCP Inspector is a web-based tool for testing MCP servers.
-
-#### Prerequisites
-1. Ensure Docker/OrbStack is running
-2. Ensure Redis is running: `docker compose ps`
-
-#### Test the Server
-```bash
-# 1. Start both servers (Redis must already be running)
-npm run dev
-
-# 2. Launch MCP Inspector in a new terminal
-npx -y @modelcontextprotocol/inspector
-
-# 3. Connect to: http://localhost:3232/mcp
-# 4. Auth flow will redirect to :3001 for authentication
-# 5. Complete OAuth flow in the Auth tab
-# 6. Test MCP features (tools, resources, prompts, etc.)
 ```
 
 ### Automated End-to-End Testing
@@ -481,14 +355,6 @@ The script:
 - **Solution**:
   - Check for existing processes: `lsof -i :3232` or `lsof -i :3001`
   - Kill existing processes or change PORT in .env files
-
-### Understanding the Mock IDP
-- The mock IDP simulates user login for testing
-- In production, this would be replaced by:
-  - Your company's SSO system (LDAP, Active Directory)
-  - Auth0/Okta login page
-  - Google/GitHub OAuth
-- The mock IDP creates random user IDs for testing multi-user scenarios
 
 ### "Authentication service unavailable" (HTTP 503)
 - **Cause**: Auth server is not running or not reachable
@@ -564,34 +430,6 @@ Backwards-compatible [transport](https://modelcontextprotocol.io/specification/2
 - Redis-backed message routing
 - Real-time event delivery
 
-## API Reference
-
-For a complete listing of all endpoints provided by each server, including OAuth authorization endpoints, MCP resource endpoints, and demo identity provider endpoints, see [docs/endpoints.md](docs/endpoints.md).
-
-## Security
-
-### Implemented Security Measures
-- **Authentication**: [OAuth 2.0](https://modelcontextprotocol.io/specification/2025-03-26/basic/authorization) with bearer tokens
-- **Token Validation**: Introspection via [RFC 7662](https://datatracker.ietf.org/doc/html/rfc7662)
-- **Authorization**: User-based session ownership
-- **Session Isolation**: Users can only access their own sessions
-- **Security Headers**:
-  - Content Security Policy (CSP)
-  - Strict Transport Security (HSTS)
-  - X-Frame-Options
-  - X-Content-Type-Options
-- **Input Validation**: Zod schemas for all inputs
-- **Error Handling**: Sanitized error responses
-
-### Security Best Practices
-1. Always use HTTPS in production
-2. Configure proper CORS origins
-3. Use strong client secrets
-4. Enable all security headers
-5. Monitor session lifetimes
-6. Implement rate limiting
-7. Use structured logging
-
 ## Monitoring & Debugging
 
 ### Logging
@@ -624,34 +462,39 @@ redis-cli GET "session:{sessionId}:owner"
 - Source maps for debugging
 - Redis monitoring commands
 
-## Contributing
+---
 
-We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details.
+# Reference
 
-### Development Workflow
-1. Fork the repository
-2. Create a feature branch
-3. Implement your changes
-4. Add tests for new functionality
-5. Ensure all tests pass
-6. Run linting and fix issues
-7. Submit a pull request
+## API Reference
 
-### Code Style
-- TypeScript with strict mode
-- ESLint configuration included
-- Prettier formatting recommended
-- Comprehensive type definitions
+For a complete listing of all endpoints provided by each server, including OAuth authorization endpoints, MCP resource endpoints, and demo identity provider endpoints, see [docs/endpoints.md](docs/endpoints.md).
 
-## License
+## Security
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+### Implemented Security Measures
+- **Authentication**: [OAuth 2.0](https://modelcontextprotocol.io/specification/2025-03-26/basic/authorization) with bearer tokens
+- **Token Validation**: Introspection via [RFC 7662](https://datatracker.ietf.org/doc/html/rfc7662)
+- **Authorization**: User-based session ownership
+- **Session Isolation**: Users can only access their own sessions
+- **Security Headers**:
+  - Content Security Policy (CSP)
+  - Strict Transport Security (HSTS)
+  - X-Frame-Options
+  - X-Content-Type-Options
+- **Input Validation**: Zod schemas for all inputs
+- **Error Handling**: Sanitized error responses
 
-## Acknowledgments
+### Security Best Practices
+1. Always use HTTPS in production
+2. Configure proper CORS origins
+3. Use strong client secrets
+4. Enable all security headers
+5. Monitor session lifetimes
+6. Implement rate limiting
+7. Use structured logging
 
-Built by the Model Context Protocol team as a reference implementation for the MCP ecosystem.
-
-## References
+## External Resources
 
 ### MCP Documentation
 - [Model Context Protocol Documentation](https://modelcontextprotocol.io)
@@ -672,8 +515,26 @@ Built by the Model Context Protocol team as a reference implementation for the M
 - [OAuth.net: End User Authentication](https://oauth.net/articles/authentication/)
 - [The Resource Server - OAuth 2.0 Simplified](https://www.oauth.com/oauth2-servers/the-resource-server/)
 
-### Architecture Patterns
-This implementation demonstrates patterns discussed in:
-- [Stack Overflow: Separating Resource and Authorization Servers](https://stackoverflow.com/questions/16228193/oauth-2-separating-resource-server-and-authorization-server)
-- [OAuth 2.0 Overview - Curity](https://curity.io/resources/learn/oauth-overview/)
-- Microsoft identity platform documentation on [OAuth 2.0 flows](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-auth-code-flow)
+---
+
+# Contributing
+
+We welcome contributions!
+
+### Development Workflow
+1. Fork the repository
+2. Create a feature branch
+3. Implement your changes
+4. Add tests for new functionality
+5. Ensure all tests pass
+6. Run linting and fix issues
+7. Submit a pull request
+
+### Code Style
+- TypeScript with strict mode
+- ESLint configuration included
+- Comprehensive type definitions
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
