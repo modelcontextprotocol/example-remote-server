@@ -84,6 +84,12 @@ const ZipResourcesInputSchema = z.object({
   files: z
     .record(z.string().url().describe("URL of the file to include in the zip"))
     .describe("Mapping of file names to URLs to include in the zip"),
+  outputType: z
+    .enum(["resourceLink", "inlinedResourceLink", "resource"])
+    .default("inlinedResourceLink")
+    .describe(
+      "How the resulting zip file should be returned. 'resourceLink' returns a link to a resource that can be read later, 'inlinedResourceLink' returns a resource_link with a data URI, and 'resource' returns a full resource object."
+    ),
 });
 
 enum ToolName {
@@ -126,6 +132,7 @@ export const createMcpServer = (): McpServerWrapper => {
   );
 
   const subscriptions: Set<string> = new Set();
+  const transientResources: Map<string, Resource> = new Map();
 
   // Set up update interval for subscribed resources
   const subsUpdateInterval = setInterval(() => {
@@ -268,6 +275,12 @@ export const createMcpServer = (): McpServerWrapper => {
 
   server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     const uri = request.params.uri;
+
+    if (transientResources.has(uri)) {
+      return {
+        contents: [transientResources.get(uri)!],
+      };
+    }
 
     if (uri.startsWith("test://static/resource/")) {
       const index = parseInt(uri.split("/").pop() ?? "", 10) - 1;
@@ -639,7 +652,7 @@ export const createMcpServer = (): McpServerWrapper => {
     }
 
     if (name === ToolName.ZIP_RESOURCES) {
-      const { files } = ZipResourcesInputSchema.parse(args);
+      const { files, outputType } = ZipResourcesInputSchema.parse(args);
 
       const zip = new JSZip();
 
@@ -660,19 +673,49 @@ export const createMcpServer = (): McpServerWrapper => {
         }
       }
 
-      const uri = `data:application/zip;base64,${await zip.generateAsync({
-        type: "base64",
-      })}`;
+      const blob = await zip.generateAsync({ type: "base64" });
+      const mimeType = "application/zip";
 
-      return {
-        content: [
-          {
-            type: "resource_link",
-            mimeType: "application/zip",
-            uri,
-          },
-        ],
-      };
+      if (outputType === "inlinedResourceLink") {
+        const uri = `data:${mimeType};base64,${blob}`;
+        return {
+          content: [
+            {
+              type: "resource_link",
+              mimeType,
+              uri,
+            },
+          ],
+        };
+      } else {
+        const name = `out_${Date.now()}.zip`;
+        const uri = `resource://${name}`;
+        const resource: Resource = { uri, name, mimeType, blob };
+
+        if (outputType === "resource") {
+          return {
+            content: [
+              {
+                type: "resource",
+                resource,
+              },
+            ],
+          };
+        } else if (outputType === "resourceLink") {
+          transientResources.set(uri, resource);
+          return {
+            content: [
+              {
+                type: "resource_link",
+                mimeType,
+                uri,
+              },
+            ],
+          };
+        } else {
+          throw new Error(`Unknown outputType: ${outputType}`);
+        }
+      }
     }
 
     throw new Error(`Unknown tool: ${name}`);
