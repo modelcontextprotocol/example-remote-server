@@ -1,6 +1,12 @@
 # MCP Server Examples
 
-This directory contains example code demonstrating how to interact with the MCP server.
+These examples demonstrate interaction with the MCP server, covering OAuth authentication, session management, and MCP operations (tools, resources, prompts).
+
+**Authentication is the most complex part** of using an MCP server with OAuth. The examples demonstrate authentication interactions using two different step-by-step approaches:
+- **client.js**: runs the server's end-to-end auth flow in the browser
+- **curl-examples.sh**: uses raw HTTP interactions (requires obtaining an access token separately)
+
+See below for details.
 
 ## Prerequisites
 
@@ -12,6 +18,28 @@ Before running any examples, ensure:
    - MCP Server: http://localhost:3232
 
 ## Available Examples
+
+### client.js
+
+Node.js client showing programmatic interaction with the MCP server.
+
+**Features:**
+- Complete OAuth flow demonstration
+- Automatic client registration
+- MCP session management
+- Tool and resource operations
+
+**Usage:**
+```bash
+# Run the example
+node client.js
+
+# Or make it executable
+chmod +x client.js
+./client.js
+```
+
+**Note:** When you complete the OAuth flow in your browser, you'll be redirected to `http://localhost:8080/callback` which will show "site can't be reached". This is expected! Simply copy the authorization code from the URL in your browser's address bar (the long string after `code=`). The script will exchange this for an access token and display it for use with other tools.
 
 ### curl-examples.sh
 
@@ -43,92 +71,8 @@ chmod +x curl-examples.sh
 
 **Quick reference:**
 - Run `./curl-examples.sh --help` for detailed usage
-- Get access token from MCP Inspector or `node client.js`
+- Requires an access token (get from MCP Inspector or `node client.js`)
 - Each step explains what to do next
-
-### client.js
-
-Node.js client showing programmatic interaction with the MCP server.
-
-**Features:**
-- Complete OAuth flow demonstration
-- Automatic client registration
-- MCP session management
-- Tool and resource operations
-
-**Usage:**
-```bash
-# Run the example
-node client.js
-
-# Or make it executable
-chmod +x client.js
-./client.js
-```
-
-**Note:** When you complete the OAuth flow in your browser, you'll be redirected to `http://localhost:8080/callback` which will show "site can't be reached". This is expected! Simply copy the authorization code from the URL in your browser's address bar (the long string after `code=`). The script will exchange this for an access token and display it for use with other tools.
-
-## Understanding OAuth Tokens
-
-**Authorization Code** vs **Access Token**:
-- **Authorization Code**: The temporary code you get from the browser redirect (e.g., `302a80e8...`)
-  - One-time use only
-  - Must be exchanged for an access token
-  - Expires quickly (usually within minutes)
-- **Access Token**: The actual bearer token for API authentication (e.g., `mcp_at_...`)
-  - Used in the `Authorization: Bearer` header
-  - Valid for 7 days
-  - What you need for `curl-examples.sh`
-
-## Getting an Access Token
-
-### Option 1: MCP Inspector (Easiest)
-
-```bash
-# Launch inspector
-npx -y @modelcontextprotocol/inspector
-
-# Connect to http://localhost:3232/mcp
-# Complete OAuth flow in the Auth tab
-# Copy the access token from the debug console
-```
-
-### Option 2: Manual OAuth Flow
-
-1. Register a client (see examples)
-2. Navigate to authorization URL
-3. Complete authentication
-4. Exchange authorization code for token
-5. Use token in API calls
-
-## Common Patterns
-
-### Making MCP Requests
-
-All MCP requests follow this pattern:
-
-```javascript
-{
-  "jsonrpc": "2.0",
-  "id": "unique-id",
-  "method": "category/action",
-  "params": { /* method-specific parameters */ }
-}
-```
-
-### Required Headers
-
-```
-Authorization: Bearer YOUR_ACCESS_TOKEN
-Content-Type: application/json
-Mcp-Session-Id: YOUR_SESSION_ID  // After initialization
-```
-
-### Session Lifecycle
-
-1. **Initialize**: Create a new session
-2. **Use**: Make requests with session ID
-3. **Terminate**: Optional cleanup (auto-expires after 5 min)
 
 ## Troubleshooting
 
