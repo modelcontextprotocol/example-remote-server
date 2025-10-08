@@ -19,6 +19,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
+import JSZip from "jszip";
 
 type ToolInput = {
   type: "object";
@@ -79,6 +80,12 @@ const GetResourceReferenceSchema = z.object({
     .describe("ID of the resource to reference (1-100)"),
 });
 
+const ZipResourcesInputSchema = z.object({
+  files: z
+    .record(z.string().url().describe("URL of the file to include in the zip"))
+    .describe("Mapping of file names to URLs to include in the zip"),
+});
+
 enum ToolName {
   ECHO = "echo",
   ADD = "add",
@@ -87,6 +94,7 @@ enum ToolName {
   GET_TINY_IMAGE = "getTinyImage",
   ANNOTATED_MESSAGE = "annotatedMessage",
   GET_RESOURCE_REFERENCE = "getResourceReference",
+  ZIP_RESOURCES = "zip",
 }
 
 enum PromptName {
@@ -446,6 +454,12 @@ export const createMcpServer = (): McpServerWrapper => {
           "Returns a resource reference that can be used by MCP clients",
         inputSchema: zodToJsonSchema(GetResourceReferenceSchema) as ToolInput,
       },
+      {
+        name: ToolName.ZIP_RESOURCES,
+        description:
+          "Compresses the provided resource files (mapping of name to URI, which can be a data URI) to a zip file, which it returns as a data URI resource link",
+        inputSchema: zodToJsonSchema(ZipResourcesInputSchema) as ToolInput,
+      },
     ];
 
     return { tools };
@@ -622,6 +636,43 @@ export const createMcpServer = (): McpServerWrapper => {
       }
 
       return { content };
+    }
+
+    if (name === ToolName.ZIP_RESOURCES) {
+      const { files } = ZipResourcesInputSchema.parse(args);
+
+      const zip = new JSZip();
+
+      for (const [fileName, fileUrl] of Object.entries(files)) {
+        try {
+          const response = await fetch(fileUrl);
+          if (!response.ok) {
+            throw new Error(
+              `Failed to fetch ${fileUrl}: ${response.statusText}`
+            );
+          }
+          const arrayBuffer = await response.arrayBuffer();
+          zip.file(fileName, arrayBuffer);
+        } catch (error) {
+          throw new Error(
+            `Error fetching file ${fileUrl}: ${error instanceof Error ? error.message : String(error)}`
+          );
+        }
+      }
+
+      const uri = `data:application/zip;base64,${await zip.generateAsync({
+        type: "base64",
+      })}`;
+
+      return {
+        content: [
+          {
+            type: "resource_link",
+            mimeType: "application/zip",
+            uri,
+          },
+        ],
+      };
     }
 
     throw new Error(`Unknown tool: ${name}`);
