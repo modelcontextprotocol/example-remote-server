@@ -19,6 +19,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
+import JSZip from "jszip";
 
 type ToolInput = {
   type: "object";
@@ -79,6 +80,16 @@ const GetResourceReferenceSchema = z.object({
     .describe("ID of the resource to reference (1-100)"),
 });
 
+const ZipResourcesInputSchema = z.object({
+  files: z
+    .record(z.string().url().describe("URL of the file to include in the zip"))
+    .describe("Mapping of file names to URLs to include in the zip"),
+  outputType: z.enum([
+    'resourceLink',
+    'resource'
+  ]).default('resource').describe("How the resulting zip file should be returned. 'resourceLink' returns a linked to a resource that can be read later, 'resource' returns a full resource object."),
+});
+
 enum ToolName {
   ECHO = "echo",
   ADD = "add",
@@ -87,6 +98,7 @@ enum ToolName {
   GET_TINY_IMAGE = "getTinyImage",
   ANNOTATED_MESSAGE = "annotatedMessage",
   GET_RESOURCE_REFERENCE = "getResourceReference",
+  ZIP_RESOURCES = "zip",
 }
 
 enum PromptName {
@@ -118,6 +130,7 @@ export const createMcpServer = (): McpServerWrapper => {
   );
 
   const subscriptions: Set<string> = new Set();
+  const transientResources: Map<string, Resource> = new Map();
 
   // Set up update interval for subscribed resources
   const subsUpdateInterval = setInterval(() => {
@@ -260,6 +273,12 @@ export const createMcpServer = (): McpServerWrapper => {
 
   server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     const uri = request.params.uri;
+
+    if (transientResources.has(uri)) {
+      return {
+        contents: [transientResources.get(uri)!],
+      };
+    }
 
     if (uri.startsWith("test://static/resource/")) {
       const index = parseInt(uri.split("/").pop() ?? "", 10) - 1;
@@ -446,6 +465,12 @@ export const createMcpServer = (): McpServerWrapper => {
           "Returns a resource reference that can be used by MCP clients",
         inputSchema: zodToJsonSchema(GetResourceReferenceSchema) as ToolInput,
       },
+      {
+        name: ToolName.ZIP_RESOURCES,
+        description:
+          "Compresses the provided resource files (mapping of name to URI, which can be a data URI) to a zip file. Supports multiple output formats: inlined data URI (default), resource link, or full resource object",
+        inputSchema: zodToJsonSchema(ZipResourcesInputSchema) as ToolInput,
+      },
     ];
 
     return { tools };
@@ -622,6 +647,53 @@ export const createMcpServer = (): McpServerWrapper => {
       }
 
       return { content };
+    }
+
+    if (name === ToolName.ZIP_RESOURCES) {
+      const { files, outputType } = ZipResourcesInputSchema.parse(args);
+      const zip = new JSZip();
+
+      for (const [fileName, fileUrl] of Object.entries(files)) {
+        try {
+          const response = await fetch(fileUrl);
+          if (!response.ok) {
+            throw new Error(
+              `Failed to fetch ${fileUrl}: ${response.statusText}`
+            );
+          }
+          const arrayBuffer = await response.arrayBuffer();
+          zip.file(fileName, arrayBuffer);
+        } catch (error) {
+          throw new Error(
+            `Error fetching file ${fileUrl}: ${error instanceof Error ? error.message : String(error)}`
+          );
+        }
+      }
+
+      const blob = await zip.generateAsync({ type: "base64" });
+      const mimeType = "application/zip";
+      const name = `out_${Date.now()}.zip`;
+      const uri = `resource://${name}`;
+      const resource: Resource = { uri, name, mimeType, blob };
+      if (outputType === "resource") {
+        return {
+          content: [{
+            type: "resource",
+            resource
+          }]
+        };
+      } else if (outputType === 'resourceLink') {
+        transientResources.set(uri, resource);
+        return {
+          content: [{
+            type: "resource_link",
+            mimeType,
+            uri
+          }]
+        };
+      } else {
+        throw new Error(`Unknown outputType: ${outputType}`);
+      }
     }
 
     throw new Error(`Unknown tool: ${name}`);
