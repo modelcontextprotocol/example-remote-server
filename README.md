@@ -18,19 +18,19 @@ The [Model Context Protocol](https://modelcontextprotocol.io) is an open standar
   - [Quick Start](#quick-start)
   - [Installation](#installation)
   - [Testing](#testing)
-  - [Repository Structure](#repository-structure)
+  - [Common Issues & Solutions](#common-issues--solutions)
 - [Understanding the System](#understanding-the-system)
   - [Features](#features)
+  - [Repository Structure](#repository-structure)
   - [Authentication & Authorization](#authentication--authorization)
   - [Configuration](#configuration)
   - [Customizing for Your Use Case](#customizing-for-your-use-case)
 - [Development & Operations](#development--operations)
   - [Development](#development)
-  - [Common Issues & Solutions](#common-issues--solutions)
-  - [Technical Details](#technical-details)
   - [Monitoring & Debugging](#monitoring--debugging)
 - [Reference](#reference)
   - [API Reference](#api-reference)
+  - [Technical Details](#technical-details)
   - [Security](#security)
   - [External Resources](#external-resources)
 - [Contributing](#contributing)
@@ -151,23 +151,65 @@ The `examples/` directory contains runnable code demonstrating OAuth and MCP int
 
 See [examples/README.md](examples/README.md) for detailed usage.
 
-## Repository Structure
+## Common Issues & Solutions
 
-This repository demonstrates a production-ready MCP deployment pattern with separate authorization and resource servers:
+### "Token validation failed"
+- **Cause**: Token expired or servers not communicating
+- **Solution**:
+  - Ensure both servers are running (`npm run dev`)
+  - Check that Redis is running (`docker compose ps`)
+  - Verify the token hasn't expired (tokens last 7 days)
 
-```
-auth-server/             # OAuth 2.0 authorization server (demo only - replace in production)
-  └── src/               # Authorization endpoints and token management
+### "Cannot connect to MCP server" or "Connection Error - Check if your MCP server is running"
+- **Cause**: Incorrect URL format or servers not running
+- **Solution**:
+  - Use the full URL with http:// prefix: `http://localhost:3232/mcp`
+  - Ensure **both** auth and MCP servers are running (`npm run dev`)
 
-mcp-server/              # MCP resource server (customize tools/resources/prompts)
-  └── src/               # MCP protocol implementation with external auth
+### "Wrong endpoint for SSE transport" or SSE connection fails to `/mcp`
+- **Cause**: Using SSE transport with Streamable HTTP endpoint
+- **Solution**:
+  - For **SSE transport** (legacy): Use `http://localhost:3232/sse`
+  - For **Streamable HTTP** (recommended): Use `http://localhost:3232/mcp`
+  - In MCP Inspector: Match transport type with the correct endpoint
 
-scripts/                 # Testing and deployment scripts
-docs/                    # Architecture and API documentation
-examples/                # Example code and usage patterns
-```
+### "Cannot connect to Docker daemon"
+- **Cause**: Docker/OrbStack not running
+- **Solution**:
+  - macOS with OrbStack: `orbctl start` (verify with `orbctl status`)
+  - Windows/Linux/macOS with Docker Desktop: Start Docker Desktop application
 
-The architecture separates authentication concerns from MCP functionality, allowing you to integrate with commercial OAuth providers (Auth0, Okta, etc.).
+### "Redis connection refused"
+- **Cause**: Redis container not running
+- **Solution**:
+  - Check Redis is running: `docker compose ps`
+  - If not running: `docker compose up -d`
+  - Ensure Docker/OrbStack is started first
+
+### "Port already in use"
+- **Cause**: Another process using port 3001 or 3232
+- **Solution**:
+  - Check for existing processes: `lsof -i :3232` or `lsof -i :3001`
+  - Kill existing processes or change PORT in .env files
+
+### "Authentication service unavailable" (HTTP 503)
+- **Cause**: Auth server is not running or not reachable
+- **What happens**: MCP server runs in degraded mode
+  - Splash page accessible with warning banner
+  - Health endpoint shows degraded status: `curl http://localhost:3232/health`
+  - Protected MCP endpoints return 503 with helpful error message
+- **Solution**:
+  - Start the auth server: `npm run dev` (starts both servers)
+  - Or start manually: `cd auth-server && npm run dev`
+  - Restart the MCP server to retry connection
+
+### "Authentication flow fails"
+- **Cause**: Misconfiguration or servers not communicating
+- **Solution**:
+  - Check server logs for error messages
+  - Ensure Redis is running: `docker compose ps`
+  - Verify .env configuration in both server directories
+  - Check that both servers are running
 
 ---
 
@@ -198,6 +240,24 @@ The architecture separates authentication concerns from MCP functionality, allow
 - **Session Ownership**: User isolation and access control
 - **Security Headers**: CSP, HSTS, X-Frame-Options, and more
 - **Bearer Token Auth**: Middleware for protected endpoints
+
+## Repository Structure
+
+This repository demonstrates a production-ready MCP deployment pattern with separate authorization and resource servers:
+
+```
+auth-server/             # OAuth 2.0 authorization server (demo only - replace in production)
+  └── src/               # Authorization endpoints and token management
+
+mcp-server/              # MCP resource server (customize tools/resources/prompts)
+  └── src/               # MCP protocol implementation with external auth
+
+scripts/                 # Testing and deployment scripts
+docs/                    # Architecture and API documentation
+examples/                # Example code and usage patterns
+```
+
+The architecture separates authentication concerns from MCP functionality, allowing you to integrate with commercial OAuth providers (Auth0, Okta, etc.).
 
 ## Authentication & Authorization
 
@@ -315,65 +375,45 @@ The script:
 - Validates token introspection between servers
 - Tests session management and ownership
 
-## Common Issues & Solutions
+## Monitoring & Debugging
 
-### "Token validation failed"
-- **Cause**: Token expired or servers not communicating
-- **Solution**:
-  - Ensure both servers are running (`npm run dev`)
-  - Check that Redis is running (`docker compose ps`)
-  - Verify the token hasn't expired (tokens last 7 days)
+### Logging
+Structured JSON logging with sanitized outputs:
+- HTTP request/response logging
+- Authentication events
+- Session lifecycle events
+- Redis operations
+- Error tracking
 
-### "Cannot connect to MCP server" or "Connection Error - Check if your MCP server is running"
-- **Cause**: Incorrect URL format or servers not running
-- **Solution**:
-  - Use the full URL with http:// prefix: `http://localhost:3232/mcp`
-  - Ensure **both** auth and MCP servers are running (`npm run dev`)
+### Redis Monitoring
+```bash
+# Monitor session ownership
+redis-cli KEYS "session:*:owner"
 
-### "Wrong endpoint for SSE transport" or SSE connection fails to `/mcp`
-- **Cause**: Using SSE transport with Streamable HTTP endpoint
-- **Solution**:
-  - For **SSE transport** (legacy): Use `http://localhost:3232/sse`
-  - For **Streamable HTTP** (recommended): Use `http://localhost:3232/mcp`
-  - In MCP Inspector: Match transport type with the correct endpoint
-  
-### "Cannot connect to Docker daemon"
-- **Cause**: Docker/OrbStack not running
-- **Solution**:
-  - macOS with OrbStack: `orbctl start` (verify with `orbctl status`)
-  - Windows/Linux/macOS with Docker Desktop: Start Docker Desktop application
+# Watch real-time operations
+redis-cli MONITOR | grep "session:"
 
-### "Redis connection refused"
-- **Cause**: Redis container not running
-- **Solution**:
-  - Check Redis is running: `docker compose ps`
-  - If not running: `docker compose up -d`
-  - Ensure Docker/OrbStack is started first
+# Check active sessions
+redis-cli PUBSUB CHANNELS "mcp:shttp:toserver:*"
 
-### "Port already in use"
-- **Cause**: Another process using port 3001 or 3232
-- **Solution**:
-  - Check for existing processes: `lsof -i :3232` or `lsof -i :3001`
-  - Kill existing processes or change PORT in .env files
+# Debug specific session
+redis-cli GET "session:{sessionId}:owner"
+```
 
-### "Authentication service unavailable" (HTTP 503)
-- **Cause**: Auth server is not running or not reachable
-- **What happens**: MCP server runs in degraded mode
-  - Splash page accessible with warning banner
-  - Health endpoint shows degraded status: `curl http://localhost:3232/health`
-  - Protected MCP endpoints return 503 with helpful error message
-- **Solution**:
-  - Start the auth server: `npm run dev` (starts both servers)
-  - Or start manually: `cd auth-server && npm run dev`
-  - Restart the MCP server to retry connection
+### Debug Tools
+- MCP Inspector for interactive debugging
+- Comprehensive test suite
+- Hot-reload development mode
+- Source maps for debugging
+- Redis monitoring commands
 
-### "Authentication flow fails"
-- **Cause**: Misconfiguration or servers not communicating
-- **Solution**:
-  - Check server logs for error messages
-  - Ensure Redis is running: `docker compose ps`
-  - Verify .env configuration in both server directories
-  - Check that both servers are running
+---
+
+# Reference
+
+## API Reference
+
+For a complete listing of all endpoints provided by each server, including OAuth authorization endpoints, MCP resource endpoints, and demo identity provider endpoints, see [docs/endpoints.md](docs/endpoints.md).
 
 ## Technical Details
 
@@ -429,46 +469,6 @@ Backwards-compatible [transport](https://modelcontextprotocol.io/specification/2
 - Session management via URL parameters
 - Redis-backed message routing
 - Real-time event delivery
-
-## Monitoring & Debugging
-
-### Logging
-Structured JSON logging with sanitized outputs:
-- HTTP request/response logging
-- Authentication events
-- Session lifecycle events
-- Redis operations
-- Error tracking
-
-### Redis Monitoring
-```bash
-# Monitor session ownership
-redis-cli KEYS "session:*:owner"
-
-# Watch real-time operations
-redis-cli MONITOR | grep "session:"
-
-# Check active sessions
-redis-cli PUBSUB CHANNELS "mcp:shttp:toserver:*"
-
-# Debug specific session
-redis-cli GET "session:{sessionId}:owner"
-```
-
-### Debug Tools
-- MCP Inspector for interactive debugging
-- Comprehensive test suite
-- Hot-reload development mode
-- Source maps for debugging
-- Redis monitoring commands
-
----
-
-# Reference
-
-## API Reference
-
-For a complete listing of all endpoints provided by each server, including OAuth authorization endpoints, MCP resource endpoints, and demo identity provider endpoints, see [docs/endpoints.md](docs/endpoints.md).
 
 ## Security
 
