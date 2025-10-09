@@ -470,7 +470,7 @@ export const createMcpServer = (): McpServerWrapper => {
       {
         name: ToolName.ZIP_RESOURCES,
         description:
-          "Compresses the provided resource files (mapping of name to URI, which can be a data URI) to a zip file, which it returns as a data URI resource link",
+          "Compresses the provided resource files (mapping of name to URI, which can be a data URI) to a zip file. Supports multiple output formats: inlined data URI (default), resource link, or full resource object",
         inputSchema: zodToJsonSchema(ZipResourcesInputSchema) as ToolInput,
       },
     ];
