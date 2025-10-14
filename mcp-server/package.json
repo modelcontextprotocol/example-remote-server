@@ -21,7 +21,6 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "express-rate-limit": "^8.0.1",
-    "jszip": "^3.10.1",
     "raw-body": "^3.0.0"
   },
   "devDependencies": {
