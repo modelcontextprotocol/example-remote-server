@@ -41,8 +41,8 @@ AUTH_MODE=internal PORT=8080 BASE_URI=$SERVER_URL node dist/index.js &
 SERVER_PID=$!
 sleep 5
 
-# Check server health
-if ! curl -s -f "$SERVER_URL/health" > /dev/null; then
+# Check server is running by accessing splash page
+if ! curl -s -f "$SERVER_URL/" > /dev/null 2>&1; then
     echo "❌ Server failed to start at $SERVER_URL"
     kill $SERVER_PID 2>/dev/null || true
     exit 1

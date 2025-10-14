@@ -13,6 +13,7 @@ import { Router } from 'express';
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import rateLimit from 'express-rate-limit';
 import { mcpAuthRouter } from '@modelcontextprotocol/sdk/server/auth/router.js';
 import { FeatureReferenceAuthProvider } from './auth/provider.js';
 import { handleMockUpstreamAuthorize, handleMockUpstreamCallback } from './handlers/mock-upstream-idp.js';
@@ -73,6 +74,23 @@ export class AuthModule {
   private setupRouter(): Router {
     const router = Router();
 
+    // Rate limiters for different route types
+    const authLimiter = rateLimit({
+      windowMs: 60 * 1000, // 1 minute
+      max: 20, // 20 requests per minute for auth endpoints
+      message: 'Too many authentication attempts',
+      standardHeaders: true,
+      legacyHeaders: false,
+    });
+
+    const staticAssetLimiter = rateLimit({
+      windowMs: 60 * 1000, // 1 minute
+      max: 100, // 100 requests per minute for static assets
+      message: 'Too many requests for static assets',
+      standardHeaders: true,
+      legacyHeaders: false,
+    });
+
     // OAuth endpoints via SDK's mcpAuthRouter
     router.use(mcpAuthRouter({
       provider: this.provider,
@@ -108,22 +126,13 @@ export class AuthModule {
     });
 
     // Mock upstream IDP endpoints (for demo purposes)
-    router.get('/mock-upstream-idp/authorize', handleMockUpstreamAuthorize);
-    router.get('/mock-upstream-idp/callback', handleMockUpstreamCallback);
+    router.get('/mock-upstream-idp/authorize', authLimiter, handleMockUpstreamAuthorize);
+    router.get('/mock-upstream-idp/callback', authLimiter, handleMockUpstreamCallback);
 
     // Static assets for auth pages
-    router.get('/mcp-logo.png', (req, res) => {
+    router.get('/mcp-logo.png', staticAssetLimiter, (req, res) => {
       const logoPath = path.join(__dirname, 'static', 'mcp.png');
       res.sendFile(logoPath);
-    });
-
-    // Health check
-    router.get('/auth/health', (req, res) => {
-      res.json({
-        status: 'healthy',
-        module: 'auth',
-        mode: 'internal'
-      });
     });
 
     return router;

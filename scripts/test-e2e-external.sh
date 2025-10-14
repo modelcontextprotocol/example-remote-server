@@ -44,8 +44,8 @@ AUTH_MODE=auth_server PORT=3001 BASE_URI=$AUTH_SERVER node dist/index.js &
 AUTH_PID=$!
 sleep 5
 
-# Check auth server
-if ! curl -s -f "$AUTH_SERVER/health" > /dev/null; then
+# Check auth server by accessing splash page
+if ! curl -s -f "$AUTH_SERVER/" > /dev/null 2>&1; then
     echo "❌ Auth server failed to start at $AUTH_SERVER"
     kill $AUTH_PID 2>/dev/null || true
     exit 1
@@ -58,8 +58,8 @@ AUTH_MODE=external AUTH_SERVER_URL=$AUTH_SERVER PORT=8080 BASE_URI=$MCP_SERVER n
 MCP_PID=$!
 sleep 5
 
-# Check MCP server
-if ! curl -s -f "$MCP_SERVER/health" > /dev/null; then
+# Check MCP server by accessing splash page
+if ! curl -s -f "$MCP_SERVER/" > /dev/null 2>&1; then
     echo "❌ MCP server failed to start at $MCP_SERVER"
     kill $AUTH_PID 2>/dev/null || true
     kill $MCP_PID 2>/dev/null || true

@@ -13,6 +13,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import rateLimit from 'express-rate-limit';
 import { BearerAuthMiddlewareOptions, requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
 import { getOAuthProtectedResourceMetadataUrl } from '@modelcontextprotocol/sdk/server/auth/router.js';
 import { ITokenValidator } from '../../interfaces/auth-validator.js';
@@ -47,7 +48,18 @@ export class MCPModule {
   private setupRouter(): Router {
     const router = Router();
 
+    // Rate limiter for static assets
+    const staticAssetLimiter = rateLimit({
+      windowMs: 60 * 1000, // 1 minute
+      max: 100, // 100 requests per minute for static assets
+      message: 'Too many requests for static assets',
+      standardHeaders: true,
+      legacyHeaders: false,
+    });
+
     // CORS configuration for MCP endpoints
+    // Intentionally permissive CORS for public MCP reference server
+    // This allows any MCP client to test against this reference implementation
     const corsOptions = {
       origin: true, // Allow any origin
       methods: ['GET', 'POST', 'DELETE'],
@@ -88,20 +100,8 @@ export class MCPModule {
     router.get('/sse', cors(corsOptions), bearerAuth, sseHeaders, handleSSEConnection);
     router.post('/message', cors(corsOptions), bearerAuth, securityHeaders, handleMessage);
 
-    // Health check
-    router.get('/health', (req, res) => {
-      res.json({
-        status: 'healthy',
-        service: 'mcp',
-        endpoints: {
-          streamable: '/mcp',
-          sse: '/sse'
-        }
-      });
-    });
-
     // Static files for MCP
-    router.get('/styles.css', (req, res) => {
+    router.get('/styles.css', staticAssetLimiter, (req, res) => {
       const cssPath = path.join(__dirname, '../../static', 'styles.css');
       res.setHeader('Content-Type', 'text/css');
       res.sendFile(cssPath);

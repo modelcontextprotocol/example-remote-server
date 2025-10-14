@@ -15,6 +15,7 @@ import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import rateLimit from 'express-rate-limit';
 import { config } from './config.js';
 import { AuthModule } from './modules/auth/index.js';
 import { MCPModule } from './modules/mcp/index.js';
@@ -38,6 +39,8 @@ async function main() {
   const app = express();
 
   // Basic middleware
+  // Intentionally permissive CORS for public MCP reference server
+  // This allows any MCP client to test against this reference implementation
   app.use(cors({ origin: true, credentials: true }));
   app.use(express.json());
   app.use(express.urlencoded({ extended: false }));
@@ -125,6 +128,7 @@ async function main() {
     console.log(`   Authorize: GET ${config.baseUri}/authorize`);
     console.log(`   Get Token: POST ${config.baseUri}/token`);
     console.log(`   Introspect: POST ${config.baseUri}/introspect`);
+    console.log(`   Revoke: POST ${config.baseUri}/revoke`);
 
   } else if (config.auth.mode === 'external') {
     // ========================================
@@ -161,12 +165,20 @@ async function main() {
     console.log('MCP Endpoints:');
     console.log(`   Streamable HTTP: ${config.baseUri}/mcp`);
     console.log(`   SSE (legacy): ${config.baseUri}/sse`);
-    console.log(`   Health Check: ${config.baseUri}/health`);
     console.log(`   OAuth Metadata: ${config.baseUri}/.well-known/oauth-authorization-server`);
   }
 
+  // Rate limiter for splash page (moderate limit)
+  const splashPageLimiter = rateLimit({
+    windowMs: 60 * 1000, // 1 minute
+    max: 50, // 50 requests per minute
+    message: 'Too many requests to splash page',
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
+
   // Splash page (customize based on mode)
-  app.get('/', (req, res) => {
+  app.get('/', splashPageLimiter, (req, res) => {
     if (config.auth.mode === 'auth_server') {
       // Simple splash page for standalone auth server
       res.send(`
@@ -199,13 +211,14 @@ async function main() {
             <div class="endpoint">GET ${config.baseUri}/authorize - Authorization endpoint</div>
             <div class="endpoint">POST ${config.baseUri}/token - Token endpoint</div>
             <div class="endpoint">POST ${config.baseUri}/introspect - Token introspection</div>
+            <div class="endpoint">POST ${config.baseUri}/revoke - Token revocation</div>
           </body>
         </html>
       `);
     } else {
       const srcStaticDir = path.join(__dirname, 'static');
       const splashPath = path.join(srcStaticDir, 'index.html');
-      let html = fs.readFileSync(splashPath, 'utf8');
+      const html = fs.readFileSync(splashPath, 'utf8');
       res.send(html);
     }
   });
