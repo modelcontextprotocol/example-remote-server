@@ -643,24 +643,35 @@ export const createMcpServer = (): McpServerWrapper => {
     }
 
     if (name === ToolName.ZIP_RESOURCES) {
-      const MAX_ZIP_FETCH_SIZE = Number(process.env.MAX_ZIP_FETCH_SIZE ?? String(10 * 1024 * 1024)); // 10 MB default
-      const MAX_ZIP_FETCH_TIME_MILLIS =  Number(process.env.MAX_ZIP_FETCH_TIME_MILLIS ?? String(30 * 1000)); // 30 seconds default.
+      const ZIP_MAX_FETCH_SIZE = Number(process.env.ZIP_MAX_FETCH_SIZE ?? String(10 * 1024 * 1024)); // 10 MB default
+      const ZIP_MAX_FETCH_TIME_MILLIS =  Number(process.env.ZIP_MAX_FETCH_TIME_MILLIS ?? String(30 * 1000)); // 30 seconds default.
+      // Comma-separated list of allowed domains. Empty means all domains are allowed.
+      const ZIP_ALLOWED_DOMAINS = (process.env.ZIP_ALLOWED_DOMAINS ?? "raw.githubusercontent.com").split(",").map(d => d.trim().toLowerCase()).filter(d => d.length > 0);
 
       const { files, outputType } = ZipResourcesInputSchema.parse(args);
       const zip = new JSZip();
 
-      let remainingUploadBytes = MAX_ZIP_FETCH_SIZE;
-      const uploadEndTime = Date.now() + MAX_ZIP_FETCH_TIME_MILLIS;
+      let remainingUploadBytes = ZIP_MAX_FETCH_SIZE;
+      const uploadEndTime = Date.now() + ZIP_MAX_FETCH_TIME_MILLIS;
 
       for (const [fileName, urlString] of Object.entries(files)) {
         try {
           if (remainingUploadBytes <= 0) {
-            throw new Error(`Max upload size of ${MAX_ZIP_FETCH_SIZE} bytes exceeded`);
+            throw new Error(`Max upload size of ${ZIP_MAX_FETCH_SIZE} bytes exceeded`);
           }
 
           const url = new URL(urlString);
           if (url.protocol !== 'http:' && url.protocol !== 'https:' && url.protocol !== 'data:') {
             throw new Error(`Unsupported URL protocol for ${urlString}. Only http, https, and data URLs are supported.`);
+          }
+          if (ZIP_ALLOWED_DOMAINS.length > 0 && (url.protocol === 'http:' || url.protocol === 'https:')) {
+            const domain = url.hostname;
+            const domainAllowed = ZIP_ALLOWED_DOMAINS.some(allowedDomain => {
+              return domain === allowedDomain || domain.endsWith(`.${allowedDomain}`);
+            });
+            if (!domainAllowed) {
+              throw new Error(`Domain ${domain} is not in the allowed domains list.`);
+            }
           }
 
           const response = await fetchSafely(url, {
