@@ -4,6 +4,7 @@ import {
   CompleteRequestSchema,
   CreateMessageRequest,
   CreateMessageResultSchema,
+  ElicitResultSchema,
   GetPromptRequestSchema,
   ListPromptsRequestSchema,
   ListResourcesRequestSchema,
@@ -79,6 +80,8 @@ const GetResourceReferenceSchema = z.object({
     .describe("ID of the resource to reference (1-100)"),
 });
 
+const ElicitInputsSchema = z.object({});
+
 enum ToolName {
   ECHO = "echo",
   ADD = "add",
@@ -87,6 +90,7 @@ enum ToolName {
   GET_TINY_IMAGE = "getTinyImage",
   ANNOTATED_MESSAGE = "annotatedMessage",
   GET_RESOURCE_REFERENCE = "getResourceReference",
+  ELICIT_INPUTS = "elicitInputs",
 }
 
 enum PromptName {
@@ -446,6 +450,12 @@ export const createMcpServer = (): McpServerWrapper => {
           "Returns a resource reference that can be used by MCP clients",
         inputSchema: zodToJsonSchema(GetResourceReferenceSchema) as ToolInput,
       },
+      {
+        name: ToolName.ELICIT_INPUTS,
+        description:
+          "Elicitation test tool that demonstrates how to request user input with various field types",
+        inputSchema: zodToJsonSchema(ElicitInputsSchema) as ToolInput,
+      },
     ];
 
     return { tools };
@@ -622,6 +632,96 @@ export const createMcpServer = (): McpServerWrapper => {
       }
 
       return { content };
+    }
+
+    if (name === ToolName.ELICIT_INPUTS) {
+      ElicitInputsSchema.parse(args);
+
+      // Call elicitInput on the server to request user input
+      const result = await server.request(
+        {
+          method: "sampling/elicitInput",
+          params: {
+            message: "Please provide inputs for the following fields:",
+            requestedSchema: {
+              type: "object",
+              properties: {
+                name: {
+                  title: "Full Name",
+                  type: "string",
+                  description: "Your full, legal name",
+                },
+                check: {
+                  title: "Agree to terms",
+                  type: "boolean",
+                  description: "A boolean check",
+                },
+                color: {
+                  title: "Favorite Color",
+                  type: "string",
+                  description: "Favorite color (open text)",
+                  default: "blue",
+                },
+                email: {
+                  title: "Email Address",
+                  type: "string",
+                  format: "email",
+                  description:
+                    "Your email address (will be verified, and never shared with anyone else)",
+                },
+                homepage: {
+                  type: "string",
+                  format: "uri",
+                  description: "Homepage / personal site",
+                },
+                birthdate: {
+                  title: "Birthdate",
+                  type: "string",
+                  format: "date",
+                  description:
+                    "Your date of birth (will never be shared with anyone else)",
+                },
+                integer: {
+                  title: "Favorite Integer",
+                  type: "integer",
+                  description:
+                    "Your favorite integer (do not give us your phone number, pin, or other sensitive info)",
+                  minimum: 1,
+                  maximum: 100,
+                  default: 42,
+                },
+                number: {
+                  title: "Favorite Number",
+                  type: "number",
+                  description: "Favorite number (there are no wrong answers)",
+                  minimum: 0,
+                  maximum: 1000,
+                  default: 3.14,
+                },
+                petType: {
+                  title: "Pet type",
+                  type: "string",
+                  enum: ["cats", "dogs", "birds", "fish", "reptiles"],
+                  enumNames: ["Cats", "Dogs", "Birds", "Fish", "Reptiles"],
+                  default: "dogs",
+                  description: "Your favorite pet type",
+                },
+              },
+              required: ["name"],
+            },
+          },
+        },
+        ElicitResultSchema
+      );
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Elicitation result: ${JSON.stringify(result, null, 2)}`,
+          },
+        ],
+      };
     }
 
     throw new Error(`Unknown tool: ${name}`);
