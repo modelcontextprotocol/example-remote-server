@@ -24,16 +24,19 @@
  * node client.js
  */
 
-const http = require('http');
-const https = require('https');
-const { URL } = require('url');
-const readline = require('readline');
-const crypto = require('crypto');
+import http from 'http';
+import https from 'https';
+import { URL } from 'url';
+import readline from 'readline';
+import crypto from 'crypto';
 
 // Configuration
-const AUTH_SERVER = 'http://localhost:3001';
 const MCP_SERVER = 'http://localhost:3232';
-const REDIRECT_URI = 'http://localhost:8080/callback';
+const REDIRECT_URI = 'http://localhost:3232/callback';
+
+// AUTH_SERVER will be discovered dynamically from OAuth metadata
+// This allows the client to work with both internal and external auth modes
+let AUTH_SERVER = null;
 
 // Colors for console output
 const colors = {
@@ -115,6 +118,43 @@ function makeRequest(url, options = {}) {
 }
 
 /**
+ * Discover OAuth endpoints from metadata
+ */
+async function discoverOAuthMetadata() {
+  log.section('Discovering OAuth Configuration');
+
+  try {
+    const response = await makeRequest(`${MCP_SERVER}/.well-known/oauth-authorization-server`, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' }
+    });
+
+    if (response.status === 200 && response.data) {
+      log.success('OAuth metadata retrieved');
+
+      // Extract the base URL from the issuer or authorization_endpoint
+      const authEndpoint = response.data.authorization_endpoint;
+      if (authEndpoint) {
+        const url = new URL(authEndpoint);
+        AUTH_SERVER = `${url.protocol}//${url.host}`;
+        log.info(`Auth server discovered at: ${AUTH_SERVER}`);
+      } else {
+        throw new Error('No authorization_endpoint found in metadata');
+      }
+
+      return response.data;
+    } else {
+      throw new Error(`Metadata discovery failed (HTTP ${response.status})`);
+    }
+  } catch (error) {
+    if (error.code === 'ECONNREFUSED') {
+      throw new Error(`Cannot connect to MCP server at ${MCP_SERVER}. Make sure it's running (npm run dev).`);
+    }
+    throw error;
+  }
+}
+
+/**
  * Step 1: Register OAuth client
  */
 async function registerClient() {
@@ -178,7 +218,7 @@ async function performOAuthFlow(clientId, clientSecret) {
   console.log('2. Complete the authentication flow');
   console.log('3. You\'ll be redirected to a URL like:');
   console.log(`   ${REDIRECT_URI}?code=AUTHORIZATION_CODE&state=demo-state`);
-  console.log(`   ${colors.yellow}(You'll see "site can't be reached" - this is expected!)${colors.reset}\n`);
+  console.log(`   ${colors.yellow}(You'll see "Cannot GET /callback" - this is expected!)${colors.reset}\n`);
 
   console.log('4. Copy the authorization code from the URL in your browser\'s address bar');
   console.log('   The code is the long string after "code=" and before "&state="\n');
@@ -260,7 +300,7 @@ async function initializeMCPSession(accessToken) {
 }
 
 /**
- * Step 4: Demonstrate MCP features
+ * Step 4: Demonstrate MCP features (tools, resources, prompts)
  */
 async function demonstrateMCPFeatures(accessToken, sessionId) {
   log.section('Demonstrating MCP Features');
@@ -373,6 +413,61 @@ async function demonstrateMCPFeatures(accessToken, sessionId) {
   } else if (resourcesResponse.data.error) {
     log.error(`Failed to list resources: ${resourcesResponse.data.error.message}`);
   }
+
+  // List prompts
+  log.info('\nFetching available prompts...');
+  const promptsResponse = await makeRequest(`${MCP_SERVER}/mcp`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Mcp-Session-Id': sessionId,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json, text/event-stream'
+    },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 'list-prompts',
+      method: 'prompts/list'
+    })
+  });
+
+  if (promptsResponse.data.result && promptsResponse.data.result.prompts) {
+    console.log(`Found ${promptsResponse.data.result.prompts.length} prompts:`);
+    promptsResponse.data.result.prompts.forEach(prompt => {
+      console.log(`  - ${colors.cyan}${prompt.name}${colors.reset}: ${prompt.description}`);
+    });
+  } else if (promptsResponse.data.error) {
+    log.error(`Failed to list prompts: ${promptsResponse.data.error.message}`);
+  }
+
+  // Get a specific prompt
+  log.info('\nGetting simple_prompt...');
+  const getPromptResponse = await makeRequest(`${MCP_SERVER}/mcp`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Mcp-Session-Id': sessionId,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json, text/event-stream'
+    },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 'get-prompt',
+      method: 'prompts/get',
+      params: {
+        name: 'simple_prompt'
+      }
+    })
+  });
+
+  if (getPromptResponse.data.result && getPromptResponse.data.result.messages) {
+    console.log('Prompt messages:');
+    getPromptResponse.data.result.messages.forEach(message => {
+      console.log(`  [${message.role}]: ${message.content.text || message.content}`);
+    });
+  } else if (getPromptResponse.data.error) {
+    log.error(`Failed to get prompt: ${getPromptResponse.data.error.message}`);
+  }
 }
 
 /**
@@ -383,6 +478,9 @@ async function main() {
   console.log('==========================\n');
 
   try {
+    // Step 0: Discover OAuth metadata
+    await discoverOAuthMetadata();
+
     // Step 1: Register client
     const { clientId, clientSecret } = await registerClient();
     console.log(`Client ID: ${clientId}`);

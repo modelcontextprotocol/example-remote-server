@@ -2,7 +2,9 @@
 
 ## Overview
 
-The MCP server implements multi-user session isolation to ensure users can only access their own MCP sessions. This is accomplished using user identifiers and Redis-backed ownership tracking.
+The MCP server implements multi-user session isolation to ensure users can only access their own MCP sessions. This is accomplished using user identifiers and session ownership tracking.
+
+**Note**: While this document describes Redis-backed storage, the server also supports in-memory storage for development. When Redis is not configured, session data is stored in memory and lost on restart.
 
 ## How It Works
 
@@ -17,7 +19,7 @@ User ID sources:
 - **Social/federated identities**: Provider links to Google, Facebook (example: `google-oauth2|112233445566778899`)
 - **Enterprise connections**: SAML, LDAP, Active Directory (example: `samlp|ad|john.doe@company.com`)
 
-**This implementation**: Mock upstream IDP returns HTML with JavaScript that generates a random UUID in the browser, stores it in `localStorage.mcpUserId`, and sends it to the server as a query parameter. This simulates user authentication for testing - different browsers/tabs get different UUIDs, allowing multi-user testing.
+**Demo mode**: The demo auth server simulates user authentication by generating unique user IDs. This allows testing multi-user scenarios without a real identity provider.
 
 ### Token Validation
 
@@ -76,7 +78,7 @@ When an MCP server starts handling a session, it subscribes to the channel. When
 
 ## Implementation
 
-### Core Functions (mcp-server/src/services/redisTransport.ts)
+### Core Functions (src/modules/mcp/services/redisTransport.ts)
 
 ```typescript
 export async function setSessionOwner(sessionId: string, userId: string): Promise<void>
@@ -135,11 +137,11 @@ redis-cli MONITOR | grep "session:"
 ## Testing
 
 ```bash
-# Run from mcp-server directory to test session isolation
-cd mcp-server && npm test -- --testNamePattern="User Session Isolation"
+# Test session isolation
+npm test -- --testNamePattern="User Session Isolation"
 
-# Run from mcp-server directory to test session ownership
-cd mcp-server && npm test -- --testNamePattern="Session Ownership"
+# Test session ownership
+npm test -- --testNamePattern="Session Ownership"
 ```
 
 ## References
