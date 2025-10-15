@@ -80,8 +80,6 @@ const GetResourceReferenceSchema = z.object({
     .describe("ID of the resource to reference (1-100)"),
 });
 
-const ElicitInputsSchema = z.object({});
-
 enum ToolName {
   ECHO = "echo",
   ADD = "add",
@@ -635,7 +633,6 @@ export const createMcpServer = (): McpServerWrapper => {
     }
 
     if (name === ToolName.ELICIT_INPUTS) {
-      // Call elicitInput on the server to request user input
       const result = await extra.sendRequest({
         method: 'elicitation/create',
         params: {
