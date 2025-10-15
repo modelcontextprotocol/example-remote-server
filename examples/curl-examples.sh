@@ -25,10 +25,11 @@
 # =============================================================================
 
 # Configuration
-AUTH_SERVER="http://localhost:3001"
 MCP_SERVER="http://localhost:3232"
 CLIENT_NAME="curl-example-client"
 REDIRECT_URI="http://localhost:3000/callback"
+# AUTH_SERVER will be discovered from OAuth metadata
+AUTH_SERVER=""
 
 # Colors for output
 RED='\033[0;31m'
@@ -67,6 +68,30 @@ parse_sse_response() {
     else
         # Return as-is if not SSE format
         echo "$RESPONSE"
+    fi
+}
+
+# =============================================================================
+# OAuth Metadata Discovery
+# =============================================================================
+
+discover_oauth_metadata() {
+    print_section "Discovering OAuth Configuration"
+
+    RESPONSE=$(curl -s "$MCP_SERVER/.well-known/oauth-authorization-server")
+
+    # Extract authorization endpoint to determine auth server
+    AUTH_ENDPOINT=$(echo "$RESPONSE" | grep -o '"authorization_endpoint":"[^"]*' | cut -d'"' -f4)
+
+    if [ -n "$AUTH_ENDPOINT" ]; then
+        # Extract base URL from authorization endpoint
+        AUTH_SERVER=$(echo "$AUTH_ENDPOINT" | sed -E 's|(https?://[^/]+).*|\1|')
+        print_success "OAuth metadata retrieved"
+        print_info "Auth server discovered at: $AUTH_SERVER"
+    else
+        print_error "Failed to discover OAuth metadata"
+        echo "Response: $RESPONSE"
+        exit 1
     fi
 }
 
@@ -111,6 +136,8 @@ initialize_session() {
         return 1
     fi
 
+    print_info "Sending initialization request to $MCP_SERVER/mcp..." >&2
+
     RESPONSE=$(curl -s -i -X POST "$MCP_SERVER/mcp" \
         -H "Authorization: Bearer $ACCESS_TOKEN" \
         -H "Content-Type: application/json" \
@@ -143,17 +170,30 @@ initialize_session() {
         JSON_DATA="$BODY"
     fi
 
-    # Check for error
-    if echo "$JSON_DATA" | grep -q "error"; then
-        print_error "Failed to initialize session"
-        echo "$JSON_DATA" >&2
+    # Check for authentication error first
+    if echo "$RESPONSE" | head -n 1 | grep -q "401"; then
+        print_error "Authentication failed - token is not valid" >&2
+        if echo "$JSON_DATA" | grep -q '"error"'; then
+            echo "$JSON_DATA" | python3 -m json.tool >&2 2>/dev/null || echo "$JSON_DATA" >&2
+        fi
+        return 1
+    fi
+
+    # Check for other errors
+    if echo "$JSON_DATA" | grep -q '"error"'; then
+        print_error "Failed to initialize session - server returned error:" >&2
+        echo "$JSON_DATA" | python3 -m json.tool >&2 2>/dev/null || echo "$JSON_DATA" >&2
         return 1
     elif [ -n "$SESSION_ID" ]; then
         # Return session ID on stdout (for capture by caller)
         echo "$SESSION_ID"
         return 0
     else
-        print_error "No session ID received"
+        print_error "Failed to initialize session - no session ID received" >&2
+        if [ -n "$BODY" ]; then
+            print_info "Response body:" >&2
+            echo "$BODY" | head -n 10 >&2
+        fi
         return 1
     fi
 }
@@ -387,8 +427,9 @@ main() {
         print_info "This script requires an OAuth access token to demonstrate MCP operations."
         print_info "Since you don't have one yet, let's help you get started!"
         echo
-        print_info "First, we'll register an OAuth client for you..."
+        print_info "First, we'll discover the OAuth server and register a client for you..."
         echo
+        discover_oauth_metadata
         register_client
         echo
         print_section "Next Steps"
