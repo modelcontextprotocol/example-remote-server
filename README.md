@@ -51,6 +51,7 @@ This server implements the complete MCP specification:
 - **[Resources](https://modelcontextprotocol.io/docs/concepts/resources)**: 100+ example resources with pagination and subscription support
 - **[Prompts](https://modelcontextprotocol.io/docs/concepts/prompts)**: Simple and complex prompts with argument support
 - **[Sampling](https://modelcontextprotocol.io/docs/concepts/sampling)**: LLM interaction capabilities
+- **[Elicitation](https://modelcontextprotocol.io/docs/concepts/elicitation)**: User input elicitation with various field types
 - **Transports**: Both Streamable HTTP (recommended) and SSE (legacy)
 
 ## Development Setup
