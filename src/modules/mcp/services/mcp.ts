@@ -19,12 +19,13 @@ import {
   UnsubscribeRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { zodToJsonSchema } from "zod-to-json-schema";
 
-type ToolInput = {
-  type: "object";
-  properties?: Record<string, unknown>;
-  required?: string[];
+type ToolInput = Tool["inputSchema"];
+
+// Helper to convert Zod schema to JSON schema using Zod v4's native support
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const toJsonSchema = (schema: z.ZodType<any>): ToolInput => {
+  return z.toJSONSchema(schema) as ToolInput;
 };
 
 /* Input schemas for tools implemented in this server */
@@ -413,40 +414,40 @@ export const createMcpServer = (): McpServerWrapper => {
       {
         name: ToolName.ECHO,
         description: "Echoes back the input",
-        inputSchema: zodToJsonSchema(EchoSchema) as ToolInput,
+        inputSchema: toJsonSchema(EchoSchema),
       },
       {
         name: ToolName.ADD,
         description: "Adds two numbers",
-        inputSchema: zodToJsonSchema(AddSchema) as ToolInput,
+        inputSchema: toJsonSchema(AddSchema),
       },
       {
         name: ToolName.LONG_RUNNING_OPERATION,
         description:
           "Demonstrates a long running operation with progress updates",
-        inputSchema: zodToJsonSchema(LongRunningOperationSchema) as ToolInput,
+        inputSchema: toJsonSchema(LongRunningOperationSchema),
       },
       {
         name: ToolName.SAMPLE_LLM,
         description: "Samples from an LLM using MCP's sampling feature",
-        inputSchema: zodToJsonSchema(SampleLLMSchema) as ToolInput,
+        inputSchema: toJsonSchema(SampleLLMSchema),
       },
       {
         name: ToolName.GET_TINY_IMAGE,
         description: "Returns the MCP_TINY_IMAGE",
-        inputSchema: zodToJsonSchema(GetTinyImageSchema) as ToolInput,
+        inputSchema: toJsonSchema(GetTinyImageSchema),
       },
       {
         name: ToolName.ANNOTATED_MESSAGE,
         description:
           "Demonstrates how annotations can be used to provide metadata about content",
-        inputSchema: zodToJsonSchema(AnnotatedMessageSchema) as ToolInput,
+        inputSchema: toJsonSchema(AnnotatedMessageSchema),
       },
       {
         name: ToolName.GET_RESOURCE_REFERENCE,
         description:
           "Returns a resource reference that can be used by MCP clients",
-        inputSchema: zodToJsonSchema(GetResourceReferenceSchema) as ToolInput,
+        inputSchema: toJsonSchema(GetResourceReferenceSchema),
       },
       {
         name: ToolName.ELICIT_INPUTS,
@@ -524,9 +525,12 @@ export const createMcpServer = (): McpServerWrapper => {
         ToolName.SAMPLE_LLM,
         maxTokens
       );
+      const contentArray = Array.isArray(result.content) ? result.content : [result.content];
+      const firstContent = contentArray[0];
+      const textContent = firstContent && "text" in firstContent ? firstContent.text : JSON.stringify(result.content);
       return {
         content: [
-          { type: "text", text: `LLM sampling result: ${result.content.text}` },
+          { type: "text", text: `LLM sampling result: ${textContent}` },
         ],
       };
     }
