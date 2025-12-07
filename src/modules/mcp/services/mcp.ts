@@ -250,8 +250,18 @@ export const createMcpServer = (): McpServerWrapper => {
       nextCursor = btoa(endIndex.toString());
     }
 
+    // Add MCP Apps UI resources
+    const uiResources: Resource[] = [
+      {
+        uri: HELLO_WORLD_APP_URI,
+        name: "Hello World MCP App",
+        description: "Interactive UI for the mcp_apps_hello_world tool",
+        mimeType: "text/html;profile=mcp-app",
+      },
+    ];
+
     return {
-      resources,
+      resources: [...resources, ...uiResources],
       nextCursor,
     };
   });
