@@ -1,4 +1,6 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import fs from "node:fs/promises";
+import path from "node:path";
 import {
   CallToolRequestSchema,
   CompleteRequestSchema,
@@ -18,7 +20,7 @@ import {
   Tool,
   UnsubscribeRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { z } from "zod";
+import { z } from "zod/v4";
 
 type ToolInput = Tool["inputSchema"];
 
@@ -90,7 +92,12 @@ enum ToolName {
   ANNOTATED_MESSAGE = "annotatedMessage",
   GET_RESOURCE_REFERENCE = "getResourceReference",
   ELICIT_INPUTS = "elicitInputs",
+  MCP_APPS_HELLO_WORLD = "mcp_apps_hello_world",
 }
+
+// MCP Apps constants
+const RESOURCE_URI_META_KEY = "ui/resourceUri";
+const HELLO_WORLD_APP_URI = "ui://hello-world/app.html";
 
 enum PromptName {
   SIMPLE = "simple_prompt",
@@ -274,6 +281,21 @@ export const createMcpServer = (): McpServerWrapper => {
       }
     }
 
+    // MCP Apps UI resources
+    if (uri === HELLO_WORLD_APP_URI) {
+      const distDir = path.join(import.meta.dirname, "../../../apps");
+      const html = await fs.readFile(path.join(distDir, "mcp-app.html"), "utf-8");
+      return {
+        contents: [
+          {
+            uri,
+            mimeType: "text/html;profile=mcp-app",
+            text: html,
+          },
+        ],
+      };
+    }
+
     throw new Error(`Unknown resource: ${uri}`);
   });
 
@@ -454,6 +476,13 @@ export const createMcpServer = (): McpServerWrapper => {
         description:
           "Elicitation test tool that demonstrates how to request user input with various field types",
         inputSchema: { type: "object" , properties: {} },
+      },
+      {
+        name: ToolName.MCP_APPS_HELLO_WORLD,
+        description:
+          "Demonstrates MCP Apps - returns an interactive UI that runs in the client",
+        inputSchema: { type: "object", properties: {} },
+        _meta: { [RESOURCE_URI_META_KEY]: HELLO_WORLD_APP_URI },
       },
     ];
 
@@ -717,6 +746,18 @@ export const createMcpServer = (): McpServerWrapper => {
             text: `Elicitation result: ${JSON.stringify(result, null, 2)}`,
           },
         ],
+      };
+    }
+
+    if (name === ToolName.MCP_APPS_HELLO_WORLD) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: "If this client supports MCP Apps, an interactive UI should have rendered for the user.",
+          },
+        ],
+        _meta: { [RESOURCE_URI_META_KEY]: HELLO_WORLD_APP_URI },
       };
     }
 
