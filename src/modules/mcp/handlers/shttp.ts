@@ -67,6 +67,7 @@ export async function handleStreamableHTTP(req: Request, res: Response) {
       });
       res.status(401).json({
         "jsonrpc": "2.0",
+        "id": null,
         "error": {
           "code": -32002,
           "message": "User ID required"
@@ -87,6 +88,7 @@ export async function handleStreamableHTTP(req: Request, res: Response) {
         });
         res.status(401).json({
           "jsonrpc": "2.0",
+          "id": null,
           "error": {
             "code": -32001,
             "message": "Session not found or access denied"
@@ -148,6 +150,7 @@ export async function handleStreamableHTTP(req: Request, res: Response) {
       });
       res.status(400).json({
         "jsonrpc": "2.0",
+        "id": null,
         "error": {
           "code": -32600,
           "message": "Invalid request method for existing session"
@@ -167,6 +170,7 @@ export async function handleStreamableHTTP(req: Request, res: Response) {
     if (!res.headersSent) {
       res.status(500).json({
         "jsonrpc": "2.0",
+        "id": null,
         "error": {
           "code": -32603,
           "message": "Internal error during request processing"

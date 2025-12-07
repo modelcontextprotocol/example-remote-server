@@ -22,7 +22,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.15.1",
+    "@modelcontextprotocol/sdk": "^1.24.2",
     "@redis/client": "^1.6.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
