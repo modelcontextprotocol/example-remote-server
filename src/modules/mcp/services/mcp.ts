@@ -754,7 +754,7 @@ export const createMcpServer = (): McpServerWrapper => {
         content: [
           {
             type: "text",
-            text: "Hello World MCP App loaded!",
+            text: "If this client supports MCP Apps, an interactive UI should have rendered for the user.",
           },
         ],
         _meta: { [RESOURCE_URI_META_KEY]: HELLO_WORLD_APP_URI },
