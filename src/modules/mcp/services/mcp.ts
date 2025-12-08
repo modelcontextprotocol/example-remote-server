@@ -1,6 +1,7 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   CallToolRequestSchema,
   CompleteRequestSchema,
@@ -293,7 +294,12 @@ export const createMcpServer = (): McpServerWrapper => {
 
     // MCP Apps UI resources
     if (uri === HELLO_WORLD_APP_URI) {
-      const distDir = path.join(import.meta.dirname, "../../../apps");
+      // Always resolve to dist/apps from project root, regardless of whether
+      // we're running from src/ (tsx dev) or dist/ (production)
+      // Path: {src,dist}/modules/mcp/services/ -> 4 levels up to project root
+      const __dirname = path.dirname(fileURLToPath(import.meta.url));
+      const projectRoot = path.join(__dirname, "../../../..");
+      const distDir = path.join(projectRoot, "dist/apps");
       const html = await fs.readFile(path.join(distDir, "mcp-app.html"), "utf-8");
       return {
         contents: [
