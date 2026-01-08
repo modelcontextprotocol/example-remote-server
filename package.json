@@ -24,7 +24,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/ext-apps": "https://pkg.pr.new/modelcontextprotocol/ext-apps/@modelcontextprotocol/ext-apps@95663d4",
-    "@modelcontextprotocol/sdk": "^1.24.2",
+    "@modelcontextprotocol/sdk": "^1.25.2",
     "@redis/client": "^1.6.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",

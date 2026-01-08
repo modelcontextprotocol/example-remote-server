@@ -144,7 +144,7 @@ export async function redisRelayToMcpServer(sessionId: string, transport: Transp
     const messagePromise = new Promise<JSONRPCMessage>((resolve) => {
       transport.onmessage = async (message, extra) => {
         // First, set up response subscription if needed
-        if ("id" in message) {
+        if ("id" in message && message.id !== undefined) {
           logger.debug('Setting up response subscription', {
             sessionId,
             messageId: message.id,
@@ -289,7 +289,7 @@ export class ServerRedisTransport implements Transport {
   }
 
   async send(message: JSONRPCMessage, options?: TransportSendOptions): Promise<void> {
-    const relatedRequestId = options?.relatedRequestId?.toString() ?? ("id" in message ? message.id?.toString() : notificationStreamId);
+    const relatedRequestId = options?.relatedRequestId?.toString() ?? ("id" in message && message.id !== undefined ? message.id.toString() : notificationStreamId);
     const channel = getToClientChannel(this._sessionId, relatedRequestId)
 
     logger.debug('Sending message to client', {
@@ -336,13 +336,13 @@ export async function getShttpTransport(sessionId: string, onsessionclosed: (ses
     isGetRequest
   });
   
-  // Giving undefined here and setting the sessionId means the 
-  // transport wont try to create a new session.
+  // For existing sessions, use stateless mode (sessionIdGenerator: undefined).
+  // The SDK will extract the session ID from the request's mcp-session-id header.
+  // Note: We cannot set sessionId directly as it's now a readonly property in the SDK.
   const shttpTransport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     onsessionclosed,
   })
-  shttpTransport.sessionId = sessionId;
 
   // Use the new request-id based relay approach
   const cleanup = await redisRelayToMcpServer(sessionId, shttpTransport, isGetRequest);

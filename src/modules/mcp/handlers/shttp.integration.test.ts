@@ -48,15 +48,22 @@ describe('Streamable HTTP Handler Integration Tests', () => {
       },
     } as unknown as Partial<Response>;
 
-    // Create mock request
+    // Create mock request with required Node.js properties for @hono/node-server
     mockReq = {
       method: 'POST',
+      url: '/',
+      httpVersion: '1.1',
       headers: {
         'content-type': 'application/json',
         'accept': 'application/json, text/event-stream',
         'mcp-protocol-version': '2024-11-05',
+        'host': 'localhost',
       },
       body: {},
+      socket: {
+        remoteAddress: '127.0.0.1',
+        remotePort: 12345,
+      },
     };
   });
 
@@ -77,13 +84,28 @@ describe('Streamable HTTP Handler Integration Tests', () => {
 
   // Helper to extract session ID from test context
   const getSessionIdFromTest = (): string | undefined => {
-    // Try to get from response headers first
+    // Try to get from response headers first (setHeader)
     const setHeaderCalls = (mockRes.setHeader as jest.Mock).mock.calls;
-    const sessionIdHeader = setHeaderCalls.find(([name]) => name === 'mcp-session-id');
+    const sessionIdHeader = setHeaderCalls.find(([name]) =>
+      name.toLowerCase() === 'mcp-session-id'
+    );
     if (sessionIdHeader?.[1]) {
       return sessionIdHeader[1] as string;
     }
-    
+
+    // Try to get from writeHead calls (headers object)
+    const writeHeadCalls = (mockRes.writeHead as jest.Mock).mock.calls;
+    for (const call of writeHeadCalls) {
+      const headers = call[1]; // Second argument is headers object
+      if (headers && typeof headers === 'object') {
+        // Check both lowercase and mixed-case variants
+        const sessionId = headers['mcp-session-id'] || headers['Mcp-Session-Id'];
+        if (sessionId) {
+          return sessionId as string;
+        }
+      }
+    }
+
     // Fall back to extracting from Redis channels
     const allChannels = Array.from(mockRedis.subscribers.keys());
     const serverChannel = allChannels.find(channel => channel.includes('mcp:shttp:toserver:'));
