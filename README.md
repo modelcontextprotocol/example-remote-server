@@ -253,4 +253,4 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file for details.
+This project is licensed under the Apache License 2.0 for new contributions, with existing code under the MIT License - see the [LICENSE](LICENSE) file for details.
