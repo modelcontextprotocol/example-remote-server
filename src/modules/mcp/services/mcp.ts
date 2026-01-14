@@ -96,7 +96,6 @@ enum ToolName {
 }
 
 // MCP Apps constants
-const RESOURCE_URI_META_KEY = "ui/resourceUri";
 const HELLO_WORLD_APP_URI = "ui://hello-world/app.html";
 
 enum PromptName {
@@ -492,7 +491,7 @@ export const createMcpServer = (): McpServerWrapper => {
         description:
           "Demonstrates MCP Apps - returns an interactive UI that runs in the client",
         inputSchema: { type: "object", properties: {} },
-        _meta: { [RESOURCE_URI_META_KEY]: HELLO_WORLD_APP_URI },
+        _meta: { ui: { resourceUri: HELLO_WORLD_APP_URI } },
       },
     ];
 
@@ -767,7 +766,19 @@ export const createMcpServer = (): McpServerWrapper => {
             text: "If this client supports MCP Apps, an interactive UI should have rendered for the user.",
           },
         ],
-        _meta: { [RESOURCE_URI_META_KEY]: HELLO_WORLD_APP_URI },
+        structuredContent: {
+          greeting: "Hello from MCP Apps!",
+          timestamp: new Date().toISOString(),
+          features: ["interactive UI", "bidirectional communication", "theme support"],
+          stats: {
+            version: "1.0.0",
+            requestCount: Math.floor(Math.random() * 1000),
+          },
+        },
+        _meta: {
+          exampleKey: "exampleValue",
+          processed: true,
+        },
       };
     }
 
