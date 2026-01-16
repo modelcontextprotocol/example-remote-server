@@ -3,6 +3,9 @@
  *
  * Each example MCP App server is mounted at its own path, sharing the same
  * OAuth authentication as the main MCP server.
+ *
+ * These servers run in STATELESS mode - each request creates a fresh server
+ * instance without maintaining session state across requests.
  */
 
 import { Router, Request, Response, NextFunction } from 'express';
@@ -10,8 +13,6 @@ import cors from 'cors';
 import { BearerAuthMiddlewareOptions, requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
 import { getOAuthProtectedResourceMetadataUrl } from '@modelcontextprotocol/sdk/server/auth/router.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
-import { randomUUID } from 'crypto';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { ITokenValidator } from '../../interfaces/auth-validator.js';
 import { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
@@ -59,13 +60,6 @@ export interface ExampleAppsConfig {
   baseUri: string;
 }
 
-// Session store: maps sessionId to { transport, server } per slug
-const sessions = new Map<string, {
-  transport: StreamableHTTPServerTransport;
-  server: McpServer;
-  slug: string;
-}>();
-
 export class ExampleAppsModule {
   private router: Router;
 
@@ -83,7 +77,7 @@ export class ExampleAppsModule {
   private setupRouter(): Router {
     const router = Router();
 
-    // CORS configuration
+    // CORS configuration - intentionally permissive for public MCP reference server
     const corsOptions = {
       origin: true,
       methods: ['GET', 'POST', 'DELETE'],
@@ -106,7 +100,7 @@ export class ExampleAppsModule {
     };
     const bearerAuth = requireBearerAuth(bearerAuthOptions);
 
-    // Handler for /:slug/mcp
+    // Handler for /:slug/mcp - stateless: each request creates a fresh server
     const handleExampleMcp = async (req: Request, res: Response) => {
       const { slug } = req.params;
       const createServer = EXAMPLE_SERVERS[slug];
@@ -114,64 +108,23 @@ export class ExampleAppsModule {
       if (!createServer) {
         res.status(404).json({
           jsonrpc: "2.0",
-          error: { code: -32001, message: `Unknown example server: ${slug}` },
+          error: { code: -32001, message: "Unknown example server" },
           id: null,
         });
         return;
       }
 
-      let transport: StreamableHTTPServerTransport | undefined;
-
       try {
-        const sessionId = req.headers['mcp-session-id'] as string | undefined;
-
-        // Check for existing session
-        if (sessionId) {
-          const session = sessions.get(sessionId);
-          if (session && session.slug === slug) {
-            await session.transport.handleRequest(req, res, req.body);
-            return;
-          } else if (session) {
-            res.status(400).json({
-              jsonrpc: "2.0",
-              error: { code: -32000, message: "Session belongs to different server" },
-              id: null,
-            });
-            return;
-          }
-        }
-
-        // New session - must be initialize request
-        if (!isInitializeRequest(req.body)) {
-          res.status(400).json({
-            jsonrpc: "2.0",
-            error: { code: -32000, message: "Bad request: not initialized" },
-            id: null,
-          });
-          return;
-        }
-
-        // Create new server instance
+        // Create fresh server and transport for each request (stateless mode)
         const server = createServer();
-        const newSessionId = randomUUID();
-
-        transport = new StreamableHTTPServerTransport({
-          sessionIdGenerator: () => newSessionId,
-          onsessioninitialized: (id) => {
-            sessions.set(id, { transport: transport!, server, slug });
-          },
+        const transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: undefined, // Stateless: no session management
         });
-
-        transport.onclose = () => {
-          if (transport?.sessionId) {
-            sessions.delete(transport.sessionId);
-          }
-        };
 
         await server.connect(transport);
         await transport.handleRequest(req, res, req.body);
       } catch (error) {
-        console.error(`Error handling ${slug} MCP request:`, error);
+        console.error('Error handling MCP request:', error);
         if (!res.headersSent) {
           res.status(500).json({
             jsonrpc: "2.0",
