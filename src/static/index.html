@@ -97,9 +97,30 @@
 
     <footer>
         <p>
-            Built by the <a href="https://modelcontextprotocol.io">Model Context Protocol</a> team 
+            Built by the <a href="https://modelcontextprotocol.io">Model Context Protocol</a> team
             as a reference implementation for the MCP ecosystem.
         </p>
     </footer>
+
+    <script>
+        function copyUrl(btn, url) {
+            // Fallback for non-HTTPS contexts
+            const textarea = document.createElement('textarea');
+            textarea.value = url;
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+
+            btn.classList.add('copied');
+            btn.querySelector('.btn-text').textContent = 'Copied!';
+            setTimeout(() => {
+                btn.classList.remove('copied');
+                btn.querySelector('.btn-text').textContent = 'Copy';
+            }, 2000);
+        }
+    </script>
 </body>
 </html>
