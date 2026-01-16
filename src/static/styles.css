@@ -91,8 +91,14 @@ h1 {
 
 .endpoints h2 {
     font-size: 1.75rem;
-    margin-bottom: 1.5rem;
+    margin-bottom: 1rem;
     font-weight: 600;
+}
+
+.section-description {
+    color: #666666;
+    margin-bottom: 1.5rem;
+    line-height: 1.5;
 }
 
 .endpoint-list {

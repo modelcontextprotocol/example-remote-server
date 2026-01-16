@@ -19,12 +19,18 @@ import rateLimit from 'express-rate-limit';
 import { config } from './config.js';
 import { AuthModule } from './modules/auth/index.js';
 import { MCPModule } from './modules/mcp/index.js';
+import { ExampleAppsModule, AVAILABLE_EXAMPLES } from './modules/example-apps/index.js';
 import { ExternalTokenValidator, InternalTokenValidator, ITokenValidator } from './interfaces/auth-validator.js';
 import { redisClient } from './modules/shared/redis.js';
 import { logger } from './modules/shared/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Format slug to human-readable name (e.g., 'budget-allocator' -> 'Budget Allocator')
+function formatServerName(slug: string): string {
+  return slug.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+}
 
 async function main() {
   // Determine server type based on auth mode
@@ -161,11 +167,23 @@ async function main() {
     // Mount MCP routes
     app.use('/', mcpModule.getRouter());
 
+    // Mount Example Apps module (MCP Apps servers at /:slug/mcp)
+    const exampleAppsModule = new ExampleAppsModule(
+      { baseUri: config.baseUri },
+      tokenValidator
+    );
+    app.use('/', exampleAppsModule.getRouter());
+
     console.log('');
     console.log('MCP Endpoints:');
     console.log(`   Streamable HTTP: ${config.baseUri}/mcp`);
     console.log(`   SSE (legacy): ${config.baseUri}/sse`);
     console.log(`   OAuth Metadata: ${config.baseUri}/.well-known/oauth-authorization-server`);
+    console.log('');
+    console.log('MCP App Example Servers:');
+    for (const slug of AVAILABLE_EXAMPLES) {
+      console.log(`   ${config.baseUri}/${slug}/mcp`);
+    }
   }
 
   // Rate limiter for splash page (moderate limit)
@@ -218,7 +236,16 @@ async function main() {
     } else {
       const srcStaticDir = path.join(__dirname, 'static');
       const splashPath = path.join(srcStaticDir, 'index.html');
-      const html = fs.readFileSync(splashPath, 'utf8');
+      let html = fs.readFileSync(splashPath, 'utf8');
+
+      // Inject example server endpoints
+      const exampleServersHtml = AVAILABLE_EXAMPLES.map(slug => `
+                <div class="endpoint">
+                    <span class="method post">POST</span>
+                    <span>/${slug}/mcp - ${formatServerName(slug)} MCP App Server</span>
+                </div>`).join('');
+      html = html.replace('<!-- EXAMPLE_SERVERS_PLACEHOLDER -->', exampleServersHtml);
+
       res.send(html);
     }
   });

@@ -25,6 +25,19 @@
   "dependencies": {
     "@modelcontextprotocol/ext-apps": "^0.4.0",
     "@modelcontextprotocol/sdk": "^1.24.2",
+    "@modelcontextprotocol/server-budget-allocator": "^0.4.1",
+    "@modelcontextprotocol/server-cohort-heatmap": "^0.4.1",
+    "@modelcontextprotocol/server-customer-segmentation": "^0.4.1",
+    "@modelcontextprotocol/server-map": "^0.4.1",
+    "@modelcontextprotocol/server-pdf": "^0.4.1",
+    "@modelcontextprotocol/server-scenario-modeler": "^0.4.1",
+    "@modelcontextprotocol/server-shadertoy": "^0.4.1",
+    "@modelcontextprotocol/server-sheet-music": "^0.4.1",
+    "@modelcontextprotocol/server-system-monitor": "^0.4.1",
+    "@modelcontextprotocol/server-threejs": "^0.4.1",
+    "@modelcontextprotocol/server-transcript": "^0.4.1",
+    "@modelcontextprotocol/server-video-resource": "^0.4.1",
+    "@modelcontextprotocol/server-wiki-explorer": "^0.4.1",
     "@redis/client": "^1.6.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
@@ -59,7 +72,7 @@
     "@types/express-serve-static-core": "^5.0.2"
   },
   "engines": {
-    "node": ">=16"
+    "node": ">=20.16.0 || >=22.3.0"
   },
   "author": "",
   "license": "MIT"
