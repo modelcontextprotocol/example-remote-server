@@ -6,6 +6,7 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch --inspect src/index.ts",
+    "dev:stdio": "tsx src/stdio.ts",
     "dev:internal": "AUTH_MODE=internal tsx watch --inspect src/index.ts",
     "dev:external": "concurrently \"AUTH_MODE=auth_server PORT=3001 BASE_URI=http://localhost:3001 tsx watch src/index.ts\" \"sleep 3 && AUTH_MODE=external AUTH_SERVER_URL=http://localhost:3001 tsx watch --inspect src/index.ts\"",
     "build": "tsc && npm run copy-static && npm run build:apps",
