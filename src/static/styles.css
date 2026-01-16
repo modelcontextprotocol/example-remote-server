@@ -117,6 +117,44 @@ h1 {
     gap: 1rem;
 }
 
+.endpoint-with-copy {
+    justify-content: space-between;
+}
+
+.endpoint-info {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex: 1;
+}
+
+.copy-btn {
+    background: #000000;
+    color: #ffffff;
+    border: none;
+    padding: 0.4rem 0.75rem;
+    font-family: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.copy-btn:hover {
+    background: #333333;
+}
+
+.copy-btn.copied {
+    background: #009900;
+}
+
+.copy-btn svg {
+    width: 14px;
+    height: 14px;
+}
+
 .method {
     font-weight: bold;
     min-width: 80px;
