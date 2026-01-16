@@ -238,12 +238,21 @@ async function main() {
       const splashPath = path.join(srcStaticDir, 'index.html');
       let html = fs.readFileSync(splashPath, 'utf8');
 
-      // Inject example server endpoints
-      const exampleServersHtml = AVAILABLE_EXAMPLES.map(slug => `
-                <div class="endpoint">
-                    <span class="method post">POST</span>
-                    <span>/${slug}/mcp - ${formatServerName(slug)} MCP App Server</span>
-                </div>`).join('');
+      // Inject example server endpoints with copy buttons
+      const exampleServersHtml = AVAILABLE_EXAMPLES.map(slug => {
+        const fullUrl = `${config.baseUri}/${slug}/mcp`;
+        return `
+                <div class="endpoint endpoint-with-copy">
+                    <div class="endpoint-info">
+                        <span class="method post">POST</span>
+                        <span>/${slug}/mcp - ${formatServerName(slug)} MCP App Server</span>
+                    </div>
+                    <button class="copy-btn" onclick="copyUrl(this, '${fullUrl}')">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                        <span class="btn-text">Copy</span>
+                    </button>
+                </div>`;
+      }).join('');
       html = html.replace('<!-- EXAMPLE_SERVERS_PLACEHOLDER -->', exampleServersHtml);
 
       res.send(html);
