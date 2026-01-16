@@ -239,8 +239,9 @@ async function main() {
       let html = fs.readFileSync(splashPath, 'utf8');
 
       // Inject example server endpoints with copy buttons
+      const baseUrl = config.baseUri.replace(/\/$/, ''); // Remove trailing slash if present
       const exampleServersHtml = AVAILABLE_EXAMPLES.map(slug => {
-        const fullUrl = `${config.baseUri}/${slug}/mcp`;
+        const fullUrl = `${baseUrl}/${slug}/mcp`;
         return `
                 <div class="endpoint endpoint-with-copy">
                     <div class="endpoint-info">
