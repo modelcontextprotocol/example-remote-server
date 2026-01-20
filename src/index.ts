@@ -44,6 +44,10 @@ async function main() {
 
   const app = express();
 
+  // Trust proxy headers (X-Forwarded-For, etc.) when behind reverse proxy (Cloudflare, etc.)
+  // This is required for rate limiting to work correctly with real client IPs
+  app.set('trust proxy', true);
+
   // Basic middleware
   // Intentionally permissive CORS for public MCP reference server
   // This allows any MCP client to test against this reference implementation
