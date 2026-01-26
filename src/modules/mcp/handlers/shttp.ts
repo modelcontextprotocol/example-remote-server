@@ -105,11 +105,16 @@ export async function handleStreamableHTTP(req: Request, res: Response) {
       shttpTransport = await getShttpTransport(sessionId, onsessionclosed, isGetRequest);
     } else if (isInitializeRequest(req.body)) {
       // New initialization request - use JSON response mode
-      logger.debug('Processing initialize request', {
-        body: req.body,
+      const initParams = req.body?.params;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const capabilities = initParams?.capabilities as Record<string, any> | undefined;
+      logger.info('=== MCP INITIALIZE REQUEST ===', {
         userId,
-        headerSessionId: sessionId, // This is the sessionId from header (should be undefined for init)
-        isInitializeRequest: true
+        clientInfo: initParams?.clientInfo,
+        protocolVersion: initParams?.protocolVersion,
+        capabilities,
+        hasExtensions: !!capabilities?.extensions,
+        extensions: capabilities?.extensions,
       });
       
       const onsessioninitialized = async (sessionId: string) => {
