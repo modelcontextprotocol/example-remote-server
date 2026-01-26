@@ -115,6 +115,7 @@ export async function handleStreamableHTTP(req: Request, res: Response) {
         capabilities,
         hasExtensions: !!capabilities?.extensions,
         extensions: capabilities?.extensions,
+        rawMessage: req.body
       });
       
       const onsessioninitialized = async (sessionId: string) => {

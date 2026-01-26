@@ -131,6 +131,7 @@ export class ExampleAppsModule {
             capabilities,
             hasExtensions: !!capabilities?.extensions,
             extensions: capabilities?.extensions,
+            rawMessage: req.body
           }));
         }
 
