@@ -24,7 +24,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/ext-apps": "^1.0.1",
-    "@modelcontextprotocol/sdk": "^1.24.2",
+    "@modelcontextprotocol/sdk": "1.24.2",
     "@modelcontextprotocol/server-budget-allocator": "^1.0.1",
     "@modelcontextprotocol/server-cohort-heatmap": "^1.0.1",
     "@modelcontextprotocol/server-customer-segmentation": "^1.0.1",
@@ -69,7 +69,8 @@
   },
   "overrides": {
     "@types/express": "^5.0.0",
-    "@types/express-serve-static-core": "^5.0.2"
+    "@types/express-serve-static-core": "5.1.0",
+    "@modelcontextprotocol/sdk": "$@modelcontextprotocol/sdk"
   },
   "engines": {
     "node": ">=20.16.0 || >=22.3.0"
