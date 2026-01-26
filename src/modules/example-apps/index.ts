@@ -16,6 +16,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { ITokenValidator } from '../../interfaces/auth-validator.js';
 import { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
+import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 
 // Import createServer from each example package (compiled JS)
 // All packages are published on the public npm registry
@@ -115,6 +116,24 @@ export class ExampleAppsModule {
       }
 
       try {
+        // Log initialization requests to inspect client capabilities/extensions
+        if (isInitializeRequest(req.body)) {
+          const initParams = req.body?.params;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const capabilities = initParams?.capabilities as Record<string, any> | undefined;
+          console.log(JSON.stringify({
+            severity: 'INFO',
+            message: `=== MCP INITIALIZE REQUEST (${slug}) ===`,
+            timestamp: new Date().toISOString(),
+            slug,
+            clientInfo: initParams?.clientInfo,
+            protocolVersion: initParams?.protocolVersion,
+            capabilities,
+            hasExtensions: !!capabilities?.extensions,
+            extensions: capabilities?.extensions,
+          }));
+        }
+
         // Create fresh server and transport for each request (stateless mode)
         const server = createServer();
         const transport = new StreamableHTTPServerTransport({
