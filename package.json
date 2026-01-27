@@ -23,21 +23,21 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@modelcontextprotocol/ext-apps": "^0.4.0",
-    "@modelcontextprotocol/sdk": "^1.24.2",
-    "@modelcontextprotocol/server-budget-allocator": "^0.4.1",
-    "@modelcontextprotocol/server-cohort-heatmap": "^0.4.1",
-    "@modelcontextprotocol/server-customer-segmentation": "^0.4.1",
-    "@modelcontextprotocol/server-map": "^0.4.1",
-    "@modelcontextprotocol/server-pdf": "^0.4.1",
-    "@modelcontextprotocol/server-scenario-modeler": "^0.4.1",
-    "@modelcontextprotocol/server-shadertoy": "^0.4.1",
-    "@modelcontextprotocol/server-sheet-music": "^0.4.1",
-    "@modelcontextprotocol/server-system-monitor": "^0.4.1",
-    "@modelcontextprotocol/server-threejs": "^0.4.1",
-    "@modelcontextprotocol/server-transcript": "^0.4.1",
-    "@modelcontextprotocol/server-video-resource": "^0.4.1",
-    "@modelcontextprotocol/server-wiki-explorer": "^0.4.1",
+    "@modelcontextprotocol/ext-apps": "^1.0.1",
+    "@modelcontextprotocol/sdk": "1.24.2",
+    "@modelcontextprotocol/server-budget-allocator": "^1.0.1",
+    "@modelcontextprotocol/server-cohort-heatmap": "^1.0.1",
+    "@modelcontextprotocol/server-customer-segmentation": "^1.0.1",
+    "@modelcontextprotocol/server-map": "^1.0.1",
+    "@modelcontextprotocol/server-pdf": "^1.0.1",
+    "@modelcontextprotocol/server-scenario-modeler": "^1.0.1",
+    "@modelcontextprotocol/server-shadertoy": "^1.0.1",
+    "@modelcontextprotocol/server-sheet-music": "^1.0.1",
+    "@modelcontextprotocol/server-system-monitor": "^1.0.1",
+    "@modelcontextprotocol/server-threejs": "^1.0.1",
+    "@modelcontextprotocol/server-transcript": "^1.0.1",
+    "@modelcontextprotocol/server-video-resource": "^1.0.1",
+    "@modelcontextprotocol/server-wiki-explorer": "^1.0.1",
     "@redis/client": "^1.6.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
@@ -69,7 +69,8 @@
   },
   "overrides": {
     "@types/express": "^5.0.0",
-    "@types/express-serve-static-core": "^5.0.2"
+    "@types/express-serve-static-core": "5.1.0",
+    "@modelcontextprotocol/sdk": "$@modelcontextprotocol/sdk"
   },
   "engines": {
     "node": ">=20.16.0 || >=22.3.0"
