@@ -170,7 +170,6 @@ async function main() {
     // Mount Example Apps module (MCP Apps servers at /:slug/mcp)
     const exampleAppsModule = new ExampleAppsModule(
       { baseUri: config.baseUri },
-      tokenValidator
     );
     app.use('/', exampleAppsModule.getRouter());
 

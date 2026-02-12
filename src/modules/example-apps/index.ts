@@ -1,8 +1,9 @@
 /**
  * Example Apps Module - Mounts ext-apps example servers at /:slug/mcp
  *
- * Each example MCP App server is mounted at its own path, sharing the same
- * OAuth authentication as the main MCP server.
+ * Each example MCP App server is mounted at its own path without authentication.
+ * The root /mcp endpoint requires OAuth bearer token authentication, but these
+ * additional example servers are publicly accessible.
  *
  * These servers run in STATELESS mode - each request creates a fresh server
  * instance without maintaining session state across requests.
@@ -10,11 +11,8 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
-import { BearerAuthMiddlewareOptions, requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
-import { getOAuthProtectedResourceMetadataUrl } from '@modelcontextprotocol/sdk/server/auth/router.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { ITokenValidator } from '../../interfaces/auth-validator.js';
 import { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 
@@ -66,7 +64,6 @@ export class ExampleAppsModule {
 
   constructor(
     private config: ExampleAppsConfig,
-    private tokenValidator: ITokenValidator
   ) {
     this.router = this.setupRouter();
   }
@@ -93,13 +90,6 @@ export class ExampleAppsModule {
       res.setHeader('X-Frame-Options', 'SAMEORIGIN');
       next();
     };
-
-    // Bearer auth middleware
-    const bearerAuthOptions: BearerAuthMiddlewareOptions = {
-      verifier: this.tokenValidator,
-      resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(new URL(this.config.baseUri))
-    };
-    const bearerAuth = requireBearerAuth(bearerAuthOptions);
 
     // Handler for /:slug/mcp - stateless: each request creates a fresh server
     const handleExampleMcp = async (req: Request, res: Response) => {
@@ -155,10 +145,10 @@ export class ExampleAppsModule {
       }
     };
 
-    // Mount routes for each example server
-    router.get('/:slug/mcp', cors(corsOptions), bearerAuth, securityHeaders, handleExampleMcp);
-    router.post('/:slug/mcp', cors(corsOptions), bearerAuth, securityHeaders, handleExampleMcp);
-    router.delete('/:slug/mcp', cors(corsOptions), bearerAuth, securityHeaders, handleExampleMcp);
+    // Mount routes for each example server (unauthenticated)
+    router.get('/:slug/mcp', cors(corsOptions), securityHeaders, handleExampleMcp);
+    router.post('/:slug/mcp', cors(corsOptions), securityHeaders, handleExampleMcp);
+    router.delete('/:slug/mcp', cors(corsOptions), securityHeaders, handleExampleMcp);
 
     return router;
   }
