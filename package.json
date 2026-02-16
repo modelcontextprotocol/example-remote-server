@@ -24,7 +24,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/ext-apps": "^1.0.1",
-    "@modelcontextprotocol/sdk": "1.24.2",
+    "@modelcontextprotocol/sdk": "1.26.0",
     "@modelcontextprotocol/server-budget-allocator": "^1.0.1",
     "@modelcontextprotocol/server-cohort-heatmap": "^1.0.1",
     "@modelcontextprotocol/server-customer-segmentation": "^1.0.1",

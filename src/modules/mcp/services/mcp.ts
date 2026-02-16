@@ -20,6 +20,11 @@ import {
   Tool,
   UnsubscribeRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import {
+  InMemoryTaskStore,
+  InMemoryTaskMessageQueue,
+} from "@modelcontextprotocol/sdk/experimental";
+import type { RequestTaskStore } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import { z } from "zod/v4";
 
 type ToolInput = Tool["inputSchema"];
@@ -109,7 +114,60 @@ interface McpServerWrapper {
   cleanup: () => void;
 }
 
+/**
+ * Runs a long operation in the background, updating task status as it progresses.
+ * Extracted from the inline longRunningOperation handler to support task-augmented execution.
+ */
+async function runLongOperation(
+  taskId: string,
+  duration: number,
+  steps: number,
+  taskStore: RequestTaskStore,
+  progressToken: string | number | undefined,
+  server: Server,
+): Promise<void> {
+  const stepDuration = duration / steps;
+
+  for (let i = 1; i <= steps; i++) {
+    await new Promise((resolve) => setTimeout(resolve, stepDuration * 1000));
+
+    // Check if task was cancelled
+    const currentTask = await taskStore.getTask(taskId);
+    if (currentTask.status === "cancelled") {
+      return;
+    }
+
+    // Update task status with human-readable message
+    await taskStore.updateTaskStatus(
+      taskId,
+      "working",
+      `Processing step ${i}/${steps}...`,
+    );
+
+    // Also send progress notification (existing behavior)
+    if (progressToken !== undefined) {
+      await server.notification({
+        method: "notifications/progress",
+        params: { progress: i, total: steps, progressToken },
+      });
+    }
+  }
+
+  // Store final result
+  await taskStore.storeTaskResult(taskId, "completed", {
+    content: [
+      {
+        type: "text",
+        text: `Long running operation completed. Duration: ${duration} seconds, Steps: ${steps}.`,
+      },
+    ],
+  });
+}
+
 export const createMcpServer = (): McpServerWrapper => {
+  const taskStore = new InMemoryTaskStore();
+  const taskMessageQueue = new InMemoryTaskMessageQueue();
+
   const server = new Server(
     {
       name: "example-servers/feature-reference",
@@ -122,8 +180,17 @@ export const createMcpServer = (): McpServerWrapper => {
         tools: {},
         logging: {},
         completions: {},
+        tasks: {
+          list: {},
+          cancel: {},
+          requests: {
+            tools: { call: {} },
+          },
+        },
       },
-    }
+      taskStore,
+      taskMessageQueue,
+    },
   );
 
   const subscriptions: Set<string> = new Set();
@@ -166,13 +233,12 @@ export const createMcpServer = (): McpServerWrapper => {
       server.notification(message);
   }, 20000);
 
-
   // Set up update interval for stderr messages
   const stdErrUpdateInterval = setInterval(() => {
     const shortTimestamp = new Date().toLocaleTimeString([], {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
     });
     server.notification({
       method: "notifications/stderr",
@@ -184,7 +250,7 @@ export const createMcpServer = (): McpServerWrapper => {
   const requestSampling = async (
     context: string,
     uri: string,
-    maxTokens: number = 100
+    maxTokens: number = 100,
   ) => {
     const request: CreateMessageRequest = {
       method: "sampling/createMessage",
@@ -293,7 +359,10 @@ export const createMcpServer = (): McpServerWrapper => {
     // MCP Apps UI resources
     if (uri === HELLO_WORLD_APP_URI) {
       const distDir = path.join(import.meta.dirname, "../../../apps");
-      const html = await fs.readFile(path.join(distDir, "mcp-app.html"), "utf-8");
+      const html = await fs.readFile(
+        path.join(distDir, "mcp-app.html"),
+        "utf-8",
+      );
       return {
         contents: [
           {
@@ -410,7 +479,7 @@ export const createMcpServer = (): McpServerWrapper => {
       const resourceId = parseInt(args?.resourceId as string, 10);
       if (isNaN(resourceId) || resourceId < 1 || resourceId > 100) {
         throw new Error(
-          `Invalid resourceId: ${args?.resourceId}. Must be a number between 1 and 100.`
+          `Invalid resourceId: ${args?.resourceId}. Must be a number between 1 and 100.`,
         );
       }
 
@@ -457,11 +526,13 @@ export const createMcpServer = (): McpServerWrapper => {
         description:
           "Demonstrates a long running operation with progress updates",
         inputSchema: toJsonSchema(LongRunningOperationSchema),
+        execution: { taskSupport: "required" },
       },
       {
         name: ToolName.SAMPLE_LLM,
         description: "Samples from an LLM using MCP's sampling feature",
         inputSchema: toJsonSchema(SampleLLMSchema),
+        execution: { taskSupport: "optional" },
       },
       {
         name: ToolName.GET_TINY_IMAGE,
@@ -484,7 +555,8 @@ export const createMcpServer = (): McpServerWrapper => {
         name: ToolName.ELICIT_INPUTS,
         description:
           "Elicitation test tool that demonstrates how to request user input with various field types",
-        inputSchema: { type: "object" , properties: {} },
+        inputSchema: { type: "object", properties: {} },
+        execution: { taskSupport: "optional" },
       },
       {
         name: ToolName.MCP_APPS_HELLO_WORLD,
@@ -524,12 +596,35 @@ export const createMcpServer = (): McpServerWrapper => {
     if (name === ToolName.LONG_RUNNING_OPERATION) {
       const validatedArgs = LongRunningOperationSchema.parse(args);
       const { duration, steps } = validatedArgs;
-      const stepDuration = duration / steps;
       const progressToken = request.params._meta?.progressToken;
 
+      // Task-augmented: create task and run in background
+      if (extra.taskStore) {
+        const task = await extra.taskStore.createTask({
+          ttl: (duration + 30) * 1000, // TTL = duration + 30s buffer
+          pollInterval: Math.max(1000, (duration / steps) * 1000), // poll once per step
+        });
+
+        // Run in background (don't await)
+        runLongOperation(
+          task.taskId,
+          duration,
+          steps,
+          extra.taskStore,
+          progressToken,
+          server,
+        ).catch((err) => {
+          extra.taskStore!.updateTaskStatus(task.taskId, "failed", String(err));
+        });
+
+        return { task };
+      }
+
+      // Non-task fallback: run synchronously (existing behavior)
+      const stepDuration = duration / steps;
       for (let i = 1; i < steps + 1; i++) {
         await new Promise((resolve) =>
-          setTimeout(resolve, stepDuration * 1000)
+          setTimeout(resolve, stepDuration * 1000),
         );
 
         if (progressToken !== undefined) {
@@ -561,11 +656,16 @@ export const createMcpServer = (): McpServerWrapper => {
       const result = await requestSampling(
         prompt,
         ToolName.SAMPLE_LLM,
-        maxTokens
+        maxTokens,
       );
-      const contentArray = Array.isArray(result.content) ? result.content : [result.content];
+      const contentArray = Array.isArray(result.content)
+        ? result.content
+        : [result.content];
       const firstContent = contentArray[0];
-      const textContent = firstContent && "text" in firstContent ? firstContent.text : JSON.stringify(result.content);
+      const textContent =
+        firstContent && "text" in firstContent
+          ? firstContent.text
+          : JSON.stringify(result.content);
       return {
         content: [
           { type: "text", text: `LLM sampling result: ${textContent}` },
@@ -675,78 +775,82 @@ export const createMcpServer = (): McpServerWrapper => {
     }
 
     if (name === ToolName.ELICIT_INPUTS) {
-      const result = await extra.sendRequest({
-        method: 'elicitation/create',
-        params: {
-          message: "Please provide inputs for the following fields:",
-          requestedSchema: {
-            type: "object",
-            properties: {
-              name: {
-                title: "Full Name",
-                type: "string",
-                description: "Your full, legal name",
+      const result = await extra.sendRequest(
+        {
+          method: "elicitation/create",
+          params: {
+            message: "Please provide inputs for the following fields:",
+            requestedSchema: {
+              type: "object",
+              properties: {
+                name: {
+                  title: "Full Name",
+                  type: "string",
+                  description: "Your full, legal name",
+                },
+                check: {
+                  title: "Agree to terms",
+                  type: "boolean",
+                  description: "A boolean check",
+                },
+                color: {
+                  title: "Favorite Color",
+                  type: "string",
+                  description: "Favorite color (open text)",
+                  default: "blue",
+                },
+                email: {
+                  title: "Email Address",
+                  type: "string",
+                  format: "email",
+                  description:
+                    "Your email address (will be verified, and never shared with anyone else)",
+                },
+                homepage: {
+                  type: "string",
+                  format: "uri",
+                  description: "Homepage / personal site",
+                },
+                birthdate: {
+                  title: "Birthdate",
+                  type: "string",
+                  format: "date",
+                  description:
+                    "Your date of birth (will never be shared with anyone else)",
+                },
+                integer: {
+                  title: "Favorite Integer",
+                  type: "integer",
+                  description:
+                    "Your favorite integer (do not give us your phone number, pin, or other sensitive info)",
+                  minimum: 1,
+                  maximum: 100,
+                  default: 42,
+                },
+                number: {
+                  title: "Favorite Number",
+                  type: "number",
+                  description: "Favorite number (there are no wrong answers)",
+                  minimum: 0,
+                  maximum: 1000,
+                  default: 3.14,
+                },
+                petType: {
+                  title: "Pet type",
+                  type: "string",
+                  enum: ["cats", "dogs", "birds", "fish", "reptiles"],
+                  enumNames: ["Cats", "Dogs", "Birds", "Fish", "Reptiles"],
+                  default: "dogs",
+                  description: "Your favorite pet type",
+                },
               },
-              check: {
-                title: "Agree to terms",
-                type: "boolean",
-                description: "A boolean check",
-              },
-              color: {
-                title: "Favorite Color",
-                type: "string",
-                description: "Favorite color (open text)",
-                default: "blue",
-              },
-              email: {
-                title: "Email Address",
-                type: "string",
-                format: "email",
-                description:
-                  "Your email address (will be verified, and never shared with anyone else)",
-              },
-              homepage: {
-                type: "string",
-                format: "uri",
-                description: "Homepage / personal site",
-              },
-              birthdate: {
-                title: "Birthdate",
-                type: "string",
-                format: "date",
-                description:
-                  "Your date of birth (will never be shared with anyone else)",
-              },
-              integer: {
-                title: "Favorite Integer",
-                type: "integer",
-                description:
-                  "Your favorite integer (do not give us your phone number, pin, or other sensitive info)",
-                minimum: 1,
-                maximum: 100,
-                default: 42,
-              },
-              number: {
-                title: "Favorite Number",
-                type: "number",
-                description: "Favorite number (there are no wrong answers)",
-                minimum: 0,
-                maximum: 1000,
-                default: 3.14,
-              },
-              petType: {
-                title: "Pet type",
-                type: "string",
-                enum: ["cats", "dogs", "birds", "fish", "reptiles"],
-                enumNames: ["Cats", "Dogs", "Birds", "Fish", "Reptiles"],
-                default: "dogs",
-                description: "Your favorite pet type",
-              },
+              required: ["name"],
             },
-            required: ["name"],
           },
-        }
-      }, ElicitResultSchema, {timeout: 10 * 60 * 1000 /* 10 minutes */});
+        },
+        ElicitResultSchema,
+        { timeout: 10 * 60 * 1000 /* 10 minutes */ },
+      );
 
       return {
         content: [
@@ -769,7 +873,11 @@ export const createMcpServer = (): McpServerWrapper => {
         structuredContent: {
           greeting: "Hello from MCP Apps!",
           timestamp: new Date().toISOString(),
-          features: ["interactive UI", "bidirectional communication", "theme support"],
+          features: [
+            "interactive UI",
+            "bidirectional communication",
+            "theme support",
+          ],
           stats: {
             version: "1.0.0",
             requestCount: Math.floor(Math.random() * 1000),
@@ -794,7 +902,7 @@ export const createMcpServer = (): McpServerWrapper => {
 
       // Filter resource IDs that start with the input value
       const values = EXAMPLE_COMPLETIONS.resourceId.filter((id) =>
-        id.startsWith(argument.value)
+        id.startsWith(argument.value),
       );
       return { completion: { values, hasMore: false, total: values.length } };
     }
@@ -806,7 +914,7 @@ export const createMcpServer = (): McpServerWrapper => {
       if (!completions) return { completion: { values: [] } };
 
       const values = completions.filter((value) =>
-        value.startsWith(argument.value)
+        value.startsWith(argument.value),
       );
       return { completion: { values, hasMore: false, total: values.length } };
     }
@@ -835,6 +943,7 @@ export const createMcpServer = (): McpServerWrapper => {
     if (subsUpdateInterval) clearInterval(subsUpdateInterval);
     if (logsUpdateInterval) clearInterval(logsUpdateInterval);
     if (stdErrUpdateInterval) clearInterval(stdErrUpdateInterval);
+    taskStore.cleanup();
   };
 
   return { server, cleanup };
