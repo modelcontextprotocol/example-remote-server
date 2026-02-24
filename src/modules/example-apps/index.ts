@@ -21,6 +21,7 @@ import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { createServer as createBudgetAllocatorServer } from '@modelcontextprotocol/server-budget-allocator';
 import { createServer as createCohortHeatmapServer } from '@modelcontextprotocol/server-cohort-heatmap';
 import { createServer as createCustomerSegmentationServer } from '@modelcontextprotocol/server-customer-segmentation';
+import { createServer as createDebugServer } from '@modelcontextprotocol/server-debug';
 import { createServer as createMapServer } from '@modelcontextprotocol/server-map';
 import { createServer as createPdfServer } from '@modelcontextprotocol/server-pdf';
 import { createServer as createScenarioModelerServer } from '@modelcontextprotocol/server-scenario-modeler';
@@ -43,6 +44,7 @@ const EXAMPLE_SERVERS: Record<string, () => McpServer> = {
   'budget-allocator': createBudgetAllocatorServer,
   'cohort-heatmap': createCohortHeatmapServer,
   'customer-segmentation': createCustomerSegmentationServer,
+  'debug': createDebugServer,
   'map': createMapServer,
   'pdf': createPdfServer,
   'scenario-modeler': createScenarioModelerServer,
