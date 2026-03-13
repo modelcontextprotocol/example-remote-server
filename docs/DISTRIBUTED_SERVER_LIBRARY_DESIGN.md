@@ -10,6 +10,8 @@ This document outlines the design for transforming the MCP Feature Reference Ser
 3. Abstract storage backends for session and auth state
 4. Maintain security features (OAuth 2.0, PKCE, session isolation)
 5. Enable horizontal scaling across multiple instances
+6. Support edge/serverless platforms (Vercel, Netlify, Cloudflare Workers)
+7. Provide deployment skills and conformance testing out of the box
 
 ---
 
@@ -22,11 +24,14 @@ This document outlines the design for transforming the MCP Feature Reference Ser
 5. [Storage Layer Design](#5-storage-layer-design)
 6. [Authentication Layer Design](#6-authentication-layer-design)
 7. [Cloud Provider Implementations](#7-cloud-provider-implementations)
-8. [Package Structure](#8-package-structure)
-9. [Migration Path](#9-migration-path)
-10. [Performance Considerations](#10-performance-considerations)
-11. [Security Considerations](#11-security-considerations)
-12. [Implementation Roadmap](#12-implementation-roadmap)
+8. [Edge & Serverless Platforms](#8-edge--serverless-platforms)
+9. [Workspace Package Design](#9-workspace-package-design)
+10. [Deployment Skills](#10-deployment-skills)
+11. [MCP Conformance Testing](#11-mcp-conformance-testing)
+12. [Migration Path](#12-migration-path)
+13. [Performance Considerations](#13-performance-considerations)
+14. [Security Considerations](#14-security-considerations)
+15. [Implementation Roadmap](#15-implementation-roadmap)
 
 ---
 
@@ -1889,172 +1894,1716 @@ const server = createMcpServer({
 
 ---
 
-## 8. Package Structure
+## 8. Edge & Serverless Platforms
 
-### 8.1 Monorepo Layout
+### 8.1 Platform Capability Matrix
+
+| Capability | **Vercel** | **Netlify** | **Cloudflare Workers** |
+|------------|-----------|------------|----------------------|
+| Runtime | Node.js / Edge (V8) | Node.js / Deno (Edge) | V8 Isolates |
+| SSE Streaming | Serverless Functions only | Functions (v2) | Native support |
+| WebSockets | No (use third-party) | No | Native support |
+| Max Execution | 300s (Pro) / 60s (Edge) | 26s / 50ms (Edge) | 30s (standard) / 15min (Workflows) |
+| KV Storage | Vercel KV (Upstash) | Netlify Blobs | Cloudflare KV |
+| Durable State | -- | -- | Durable Objects |
+| Message Queues | Via Upstash QStash | Via external | Cloudflare Queues |
+| SQL Database | Vercel Postgres | Netlify Connect | Cloudflare D1 (SQLite) |
+| Cold Start | ~250ms / <1ms (Edge) | ~500ms / <1ms (Edge) | <1ms |
+
+### 8.2 Vercel + Upstash
+
+Vercel is the most natural fit for Node.js MCP servers. Its ecosystem with Upstash provides edge-compatible Redis, queuing, and Kafka.
+
+**Key Insight**: Upstash Redis uses an **HTTP-based REST API**, making it compatible with edge runtimes that lack raw TCP socket support. This is critical — standard `redis` npm clients won't work on edge, but `@upstash/redis` will.
+
+#### Transport: Upstash QStash + Redis
+
+```typescript
+import { Redis } from '@upstash/redis';
+import { Client as QStashClient } from '@upstash/qstash';
+
+export interface UpstashTransportOptions {
+  redis: {
+    url: string;
+    token: string;
+  };
+  /** Use QStash for reliable delivery with retries */
+  qstash?: {
+    token: string;
+    callbackUrl: string;
+  };
+}
+
+export class UpstashTransport implements ITransport {
+  readonly type = 'upstash';
+
+  private redis: Redis;
+  private qstash?: QStashClient;
+
+  constructor(private options: UpstashTransportOptions) {
+    // HTTP-based Redis — works on Vercel Edge, CF Workers, Netlify Edge
+    this.redis = new Redis({
+      url: options.redis.url,
+      token: options.redis.token,
+    });
+
+    if (options.qstash) {
+      this.qstash = new QStashClient({ token: options.qstash.token });
+    }
+  }
+
+  async subscribe(
+    sessionId: string,
+    handler: MessageHandler
+  ): Promise<Subscription> {
+    // Upstash doesn't support true Pub/Sub over HTTP.
+    // Two strategies:
+    //
+    // Strategy A: Polling (simple, higher latency)
+    //   - Messages written to a Redis list
+    //   - Subscriber polls with LPOP
+    //
+    // Strategy B: QStash webhooks (recommended)
+    //   - Publisher sends via QStash
+    //   - QStash calls webhook URL on subscriber
+    //   - Built-in retries, deduplication, DLQ
+
+    const listKey = `mcp:toserver:${sessionId}`;
+    let active = true;
+
+    const poll = async () => {
+      while (active) {
+        const message = await this.redis.lpop<string>(listKey);
+        if (message) {
+          await handler(JSON.parse(message));
+        } else {
+          // Backoff when no messages
+          await new Promise(r => setTimeout(r, 100));
+        }
+      }
+    };
+
+    poll(); // fire-and-forget
+
+    return {
+      get isActive() { return active; },
+      unsubscribe: async () => { active = false; },
+    };
+  }
+
+  async publish(
+    sessionId: string,
+    message: McpMessage,
+    options?: PublishOptions
+  ): Promise<void> {
+    if (this.qstash && this.options.qstash) {
+      // Reliable delivery via QStash webhook
+      await this.qstash.publishJSON({
+        url: `${this.options.qstash.callbackUrl}/mcp/webhook/${sessionId}`,
+        body: message,
+        deduplicationId: options?.messageId,
+        retries: 3,
+      });
+    } else {
+      // Direct Redis list push
+      const listKey = `mcp:toclient:${sessionId}`;
+      await this.redis.rpush(listKey, JSON.stringify(message));
+    }
+  }
+
+  async hasActiveSubscribers(sessionId: string): Promise<boolean> {
+    // Check if session marker exists
+    const marker = await this.redis.exists(`mcp:active:${sessionId}`);
+    return marker === 1;
+  }
+
+  async sendControl(
+    sessionId: string,
+    control: ControlMessage
+  ): Promise<void> {
+    const key = `mcp:control:${sessionId}`;
+    await this.redis.rpush(key, JSON.stringify(control));
+  }
+}
+```
+
+#### Storage: Upstash Redis
+
+```typescript
+export class UpstashStorage implements IStorage {
+  readonly type = 'upstash';
+
+  private redis: Redis;
+  readonly sessions: ISessionStorage;
+  readonly auth: IAuthStorage;
+
+  constructor(options: { url: string; token: string }) {
+    this.redis = new Redis({ url: options.url, token: options.token });
+    this.sessions = new UpstashSessionStorage(this.redis);
+    this.auth = new UpstashAuthStorage(this.redis);
+  }
+
+  // All standard IStorage methods — works identically to Redis
+  // but uses HTTP instead of TCP, so it's edge-compatible
+  async get<T>(key: string): Promise<T | null> {
+    return this.redis.get<T>(key);
+  }
+
+  async set<T>(key: string, value: T, options?: SetOptions): Promise<void> {
+    if (options?.ttl) {
+      await this.redis.set(key, JSON.stringify(value), { ex: options.ttl });
+    } else {
+      await this.redis.set(key, JSON.stringify(value));
+    }
+  }
+
+  async delete(key: string): Promise<boolean> {
+    const result = await this.redis.del(key);
+    return result > 0;
+  }
+
+  async exists(key: string): Promise<boolean> {
+    const result = await this.redis.exists(key);
+    return result === 1;
+  }
+
+  async connect(): Promise<void> { /* HTTP-based, no connection needed */ }
+  async disconnect(): Promise<void> { /* No-op */ }
+}
+```
+
+#### Vercel Deployment Example
+
+```typescript
+// api/mcp/route.ts (Next.js App Router)
+import { createMcpHandler } from '@mcp/distributed-server/vercel';
+import { UpstashTransport } from '@mcp/transport-upstash';
+import { UpstashStorage } from '@mcp/storage-upstash';
+
+const handler = createMcpHandler({
+  name: 'my-vercel-mcp',
+  version: '1.0.0',
+  transport: new UpstashTransport({
+    redis: {
+      url: process.env.UPSTASH_REDIS_REST_URL!,
+      token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+    },
+  }),
+  storage: new UpstashStorage({
+    url: process.env.UPSTASH_REDIS_REST_URL!,
+    token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+  }),
+  tools: { /* ... */ },
+});
+
+export const POST = handler;
+export const GET = handler;
+export const DELETE = handler;
+```
+
+### 8.3 Cloudflare Workers + Durable Objects
+
+Cloudflare Workers are the most interesting platform for MCP because **Durable Objects** provide exactly what distributed MCP needs: stateful, single-instance actors with WebSocket support.
+
+**Key Insight**: A Durable Object can *be* the MCP session. Instead of external pub/sub routing messages between stateless handlers and stateful servers, each session lives inside its own Durable Object. This eliminates the transport layer entirely for single-region deployments.
+
+#### Architecture: Durable Objects as Sessions
+
+```
+Client Request
+    │
+    ▼
+┌──────────────────┐
+│  Worker (Router)  │  ← Stateless, routes by session ID
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────────────────┐
+│  Durable Object: MCP Session │  ← Stateful, single-threaded
+│  ┌─────────────────────────┐ │
+│  │  MCP Server Instance    │ │
+│  │  Tools, Resources, etc. │ │
+│  │  Session State          │ │
+│  └─────────────────────────┘ │
+│  Built-in: WebSocket, Alarm  │
+│  Storage: Transactional KV   │
+└──────────────────────────────┘
+```
+
+#### Transport: Durable Objects (Zero External Dependencies)
+
+```typescript
+import { DurableObject } from 'cloudflare:workers';
+
+export interface CloudflareTransportOptions {
+  /** Fallback to Cloudflare Queues for cross-region */
+  queues?: {
+    producer: Queue;
+    consumerHandler: (batch: MessageBatch) => Promise<void>;
+  };
+}
+
+// The Durable Object IS the transport + session combined
+export class McpSessionDO extends DurableObject {
+  private mcpServer: McpServerInstance | null = null;
+  private websockets: Set<WebSocket> = new Set();
+
+  constructor(state: DurableObjectState, env: Env) {
+    super(state, env);
+  }
+
+  // HTTP request handler — Streamable HTTP transport
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+
+    if (request.headers.get('Upgrade') === 'websocket') {
+      return this.handleWebSocket(request);
+    }
+
+    if (request.method === 'POST') {
+      return this.handleMcpRequest(request);
+    }
+
+    if (request.method === 'GET') {
+      return this.handleSSE(request);
+    }
+
+    if (request.method === 'DELETE') {
+      return this.handleShutdown(request);
+    }
+
+    return new Response('Method not allowed', { status: 405 });
+  }
+
+  private async handleMcpRequest(request: Request): Promise<Response> {
+    if (!this.mcpServer) {
+      this.mcpServer = await this.initializeMcpServer();
+    }
+
+    const body = await request.json();
+    const response = await this.mcpServer.handleMessage(body);
+
+    // Reset inactivity alarm
+    await this.ctx.storage.setAlarm(Date.now() + 5 * 60 * 1000);
+
+    return new Response(JSON.stringify(response), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  private handleWebSocket(request: Request): Response {
+    const pair = new WebSocketPair();
+    const [client, server] = Object.values(pair);
+
+    this.ctx.acceptWebSocket(server);
+    this.websockets.add(server);
+
+    server.addEventListener('message', async (event) => {
+      if (!this.mcpServer) {
+        this.mcpServer = await this.initializeMcpServer();
+      }
+
+      const message = JSON.parse(event.data as string);
+      const response = await this.mcpServer.handleMessage(message);
+
+      server.send(JSON.stringify(response));
+    });
+
+    server.addEventListener('close', () => {
+      this.websockets.delete(server);
+    });
+
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  // Durable Object alarm — inactivity timeout
+  async alarm(): Promise<void> {
+    // No activity for 5 minutes — shut down
+    for (const ws of this.websockets) {
+      ws.close(1000, 'Session timeout');
+    }
+    this.websockets.clear();
+    this.mcpServer = null;
+  }
+
+  private async initializeMcpServer(): Promise<McpServerInstance> {
+    // Tools and resources registered via env bindings
+    // This is where the user's tool definitions run
+    return createMcpServerInstance(this.env);
+  }
+}
+
+// Worker router — stateless entry point
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
+
+    // Extract or generate session ID
+    const sessionId = request.headers.get('Mcp-Session-Id')
+      ?? crypto.randomUUID();
+
+    // Route to the Durable Object for this session
+    const id = env.MCP_SESSIONS.idFromName(sessionId);
+    const stub = env.MCP_SESSIONS.get(id);
+
+    const response = await stub.fetch(request);
+
+    // Add session ID header if this is a new session
+    if (!request.headers.get('Mcp-Session-Id')) {
+      const headers = new Headers(response.headers);
+      headers.set('Mcp-Session-Id', sessionId);
+      return new Response(response.body, {
+        status: response.status,
+        headers,
+      });
+    }
+
+    return response;
+  },
+};
+```
+
+#### Storage: Durable Object Transactional Storage + KV
+
+```typescript
+// For session-local state: Durable Object built-in storage
+// For shared state (auth, clients): Cloudflare KV
+
+export class CloudflareStorage implements IStorage {
+  readonly type = 'cloudflare';
+
+  readonly sessions: ISessionStorage;
+  readonly auth: IAuthStorage;
+
+  constructor(
+    private kv: KVNamespace,
+    private doStorage?: DurableObjectStorage
+  ) {
+    this.sessions = new CloudflareSessionStorage(kv, doStorage);
+    this.auth = new CloudflareAuthStorage(kv);
+  }
+
+  async get<T>(key: string): Promise<T | null> {
+    const value = await this.kv.get(key, 'json');
+    return value as T | null;
+  }
+
+  async set<T>(key: string, value: T, options?: SetOptions): Promise<void> {
+    await this.kv.put(key, JSON.stringify(value), {
+      expirationTtl: options?.ttl,
+    });
+  }
+
+  async delete(key: string): Promise<boolean> {
+    await this.kv.delete(key);
+    return true;
+  }
+
+  async exists(key: string): Promise<boolean> {
+    const value = await this.kv.get(key);
+    return value !== null;
+  }
+
+  async connect(): Promise<void> { /* Bound at deploy time */ }
+  async disconnect(): Promise<void> { /* No-op */ }
+}
+
+// For transactional session state inside a Durable Object:
+class DurableObjectSessionStore {
+  constructor(private storage: DurableObjectStorage) {}
+
+  async get<T>(key: string): Promise<T | undefined> {
+    return this.storage.get<T>(key);
+  }
+
+  async set<T>(key: string, value: T): Promise<void> {
+    await this.storage.put(key, value);
+  }
+
+  // Transactional batch operations
+  async transaction(fn: (txn: DurableObjectTransaction) => Promise<void>) {
+    await this.storage.transaction(fn);
+  }
+}
+```
+
+#### Cross-Region: Cloudflare Queues
+
+```typescript
+// For multi-region Cloudflare deployments where Durable Objects
+// need to communicate across regions:
+
+export class CloudflareQueuesTransport implements ITransport {
+  readonly type = 'cloudflare-queues';
+
+  constructor(
+    private producer: Queue,
+    private env: Env
+  ) {}
+
+  async publish(
+    sessionId: string,
+    message: McpMessage,
+    options?: PublishOptions
+  ): Promise<void> {
+    await this.producer.send({
+      sessionId,
+      message,
+      messageId: options?.messageId,
+    });
+  }
+
+  // Consumer is configured in wrangler.toml:
+  // [[queues.consumers]]
+  //   queue = "mcp-messages"
+  //   max_batch_size = 10
+  //   max_batch_timeout = 1
+
+  async queue(batch: MessageBatch): Promise<void> {
+    for (const msg of batch.messages) {
+      const { sessionId, message } = msg.body;
+
+      const id = this.env.MCP_SESSIONS.idFromName(sessionId);
+      const stub = this.env.MCP_SESSIONS.get(id);
+
+      await stub.fetch(new Request('https://internal/mcp', {
+        method: 'POST',
+        body: JSON.stringify(message),
+      }));
+
+      msg.ack();
+    }
+  }
+}
+```
+
+#### Cloudflare Deployment Example
+
+```toml
+# wrangler.toml
+name = "my-mcp-server"
+main = "src/worker.ts"
+compatibility_date = "2025-12-01"
+
+[[durable_objects.bindings]]
+name = "MCP_SESSIONS"
+class_name = "McpSessionDO"
+
+[[kv_namespaces]]
+binding = "MCP_KV"
+id = "abc123"
+
+[[queues.producers]]
+binding = "MCP_QUEUE"
+queue = "mcp-messages"
+
+[[queues.consumers]]
+queue = "mcp-messages"
+max_batch_size = 10
+```
+
+```typescript
+// src/worker.ts
+import { createMcpWorker, McpSessionDO } from '@mcp/platform-cloudflare';
+
+export { McpSessionDO };
+
+export default createMcpWorker({
+  name: 'my-mcp-server',
+  version: '1.0.0',
+  tools: {
+    greet: {
+      description: 'Greet someone',
+      schema: { name: { type: 'string' } },
+      handler: async ({ name }) => ({
+        content: [{ type: 'text', text: `Hello, ${name}!` }],
+      }),
+    },
+  },
+});
+```
+
+### 8.4 Netlify
+
+Netlify Functions v2 (AWS Lambda-based) support streaming responses, making them viable for MCP's Streamable HTTP transport. Edge Functions (Deno-based) have tighter execution limits.
+
+**Best strategy**: Use Netlify Functions v2 for the MCP handler, pair with an external transport (Upstash is the best fit since it works over HTTP).
+
+#### Netlify Deployment Example
+
+```typescript
+// netlify/functions/mcp.mts (Netlify Functions v2)
+import { createMcpHandler } from '@mcp/distributed-server/netlify';
+import { UpstashTransport } from '@mcp/transport-upstash';
+import { UpstashStorage } from '@mcp/storage-upstash';
+
+export default createMcpHandler({
+  name: 'netlify-mcp',
+  version: '1.0.0',
+  transport: new UpstashTransport({
+    redis: {
+      url: process.env.UPSTASH_REDIS_REST_URL!,
+      token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+    },
+  }),
+  storage: new UpstashStorage({
+    url: process.env.UPSTASH_REDIS_REST_URL!,
+    token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+  }),
+  tools: { /* ... */ },
+});
+
+// Config for streaming
+export const config = {
+  path: '/mcp',
+  method: ['GET', 'POST', 'DELETE'],
+};
+```
+
+### 8.5 Platform Decision Guide
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Which platform should I use?                               │
+└─────────────────────────────────────────────────────────────┘
+         │
+         ├── Need WebSocket support?
+         │       YES → Cloudflare Workers (Durable Objects)
+         │
+         ├── Need zero cold start?
+         │       YES → Cloudflare Workers (<1ms)
+         │             or Vercel Edge Functions
+         │
+         ├── Already using Next.js?
+         │       YES → Vercel + Upstash
+         │
+         ├── Need stateful sessions without external DB?
+         │       YES → Cloudflare Durable Objects
+         │             (session state lives in the DO itself)
+         │
+         ├── Need managed infrastructure cloud?
+         │       AWS → Lambda + SQS + DynamoDB
+         │       GCP → Cloud Functions + Pub/Sub + Firestore
+         │       Azure → Functions + Service Bus + CosmosDB
+         │
+         ├── Already using Netlify?
+         │       YES → Netlify Functions v2 + Upstash
+         │
+         └── Just want it to work?
+                 → Self-hosted Node.js + Redis
+                   (simplest, most flexible)
+```
+
+---
+
+## 9. Workspace Package Design
+
+### 9.1 pnpm Workspace Configuration
+
+The monorepo uses **pnpm workspaces** for fast installs, strict dependency isolation, and efficient disk usage via content-addressable storage.
+
+```yaml
+# pnpm-workspace.yaml
+packages:
+  - 'packages/*'
+  - 'platforms/*'
+  - 'examples/*'
+  - 'skills/*'
+```
+
+```jsonc
+// Root package.json
+{
+  "name": "@mcp/monorepo",
+  "private": true,
+  "scripts": {
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "conformance": "turbo run conformance",
+    "publish-packages": "pnpm -r publish --access public"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0",
+    "tsup": "^8.0.0",
+    "changesets": "^2.27.0"
+  }
+}
+```
+
+### 9.2 Full Monorepo Layout
 
 ```
 @mcp/
-├── distributed-server/          # Core library
-│   ├── src/
-│   │   ├── index.ts            # Main exports
-│   │   ├── server.ts           # McpServer class
-│   │   ├── interfaces/         # Core interfaces
-│   │   ├── adapters/           # HTTP framework adapters
-│   │   │   ├── express.ts
-│   │   │   ├── fastify.ts
-│   │   │   ├── hono.ts
-│   │   │   └── node-http.ts
-│   │   └── serverless/         # Serverless handlers
-│   │       ├── aws-lambda.ts
-│   │       ├── gcp-functions.ts
-│   │       └── azure-functions.ts
-│   └── package.json
+├── pnpm-workspace.yaml
+├── turbo.json                        # Turborepo build orchestration
+├── .changeset/                       # Changeset version management
 │
-├── transport-redis/            # Redis transport
-│   ├── src/
-│   │   ├── index.ts
-│   │   ├── pubsub.ts          # Pub/Sub implementation
-│   │   └── streams.ts         # Streams implementation
-│   └── package.json
+├── packages/                         # Core library + provider packages
+│   ├── core/                         # @mcp/distributed-server
+│   │   ├── src/
+│   │   │   ├── index.ts             # Public API exports
+│   │   │   ├── server.ts            # McpServer class
+│   │   │   ├── interfaces/          # ITransport, IStorage, IAuth
+│   │   │   │   ├── transport.ts
+│   │   │   │   ├── storage.ts
+│   │   │   │   └── auth.ts
+│   │   │   ├── adapters/            # HTTP framework adapters
+│   │   │   │   ├── express.ts
+│   │   │   │   ├── fastify.ts
+│   │   │   │   ├── hono.ts
+│   │   │   │   └── node-http.ts
+│   │   │   ├── defaults/            # Zero-config defaults
+│   │   │   │   ├── memory-transport.ts
+│   │   │   │   ├── memory-storage.ts
+│   │   │   │   └── internal-auth.ts
+│   │   │   └── testing/             # Test utilities for consumers
+│   │   │       ├── mock-transport.ts
+│   │   │       ├── mock-storage.ts
+│   │   │       └── test-client.ts
+│   │   ├── package.json
+│   │   └── tsup.config.ts
+│   │
+│   ├── transport-redis/              # @mcp/transport-redis
+│   ├── transport-upstash/            # @mcp/transport-upstash
+│   ├── transport-aws/                # @mcp/transport-aws (SQS/SNS)
+│   ├── transport-gcp/                # @mcp/transport-gcp (Pub/Sub)
+│   ├── transport-azure/              # @mcp/transport-azure (Service Bus)
+│   │
+│   ├── storage-redis/                # @mcp/storage-redis
+│   ├── storage-upstash/              # @mcp/storage-upstash
+│   ├── storage-aws/                  # @mcp/storage-aws (DynamoDB)
+│   ├── storage-gcp/                  # @mcp/storage-gcp (Firestore)
+│   ├── storage-azure/                # @mcp/storage-azure (CosmosDB)
+│   │
+│   ├── auth-internal/                # @mcp/auth-internal
+│   ├── auth-auth0/                   # @mcp/auth-auth0
+│   ├── auth-cognito/                 # @mcp/auth-cognito
+│   ├── auth-firebase/                # @mcp/auth-firebase
+│   ├── auth-azure-ad/                # @mcp/auth-azure-ad
+│   ├── auth-okta/                    # @mcp/auth-okta
+│   │
+│   └── conformance/                  # @mcp/conformance-utils
+│       ├── src/
+│       │   ├── index.ts
+│       │   ├── runner.ts            # Wraps official conformance suite
+│       │   ├── profiles.ts          # Test profiles per platform
+│       │   └── reporters/           # Output formatters
+│       │       ├── console.ts
+│       │       ├── json.ts
+│       │       └── github-actions.ts
+│       └── package.json
 │
-├── transport-aws/              # AWS transports
-│   ├── src/
-│   │   ├── index.ts
-│   │   ├── sqs.ts
-│   │   └── sns-sqs.ts
-│   └── package.json
+├── platforms/                        # Platform-specific entry points
+│   ├── vercel/                       # @mcp/platform-vercel
+│   │   ├── src/
+│   │   │   ├── index.ts
+│   │   │   ├── handler.ts          # Next.js route handler adapter
+│   │   │   ├── edge.ts             # Edge Function support
+│   │   │   └── middleware.ts        # Vercel middleware integration
+│   │   └── package.json
+│   │
+│   ├── cloudflare/                   # @mcp/platform-cloudflare
+│   │   ├── src/
+│   │   │   ├── index.ts
+│   │   │   ├── worker.ts           # Worker entry point
+│   │   │   ├── durable-object.ts   # MCP Session Durable Object
+│   │   │   └── queues.ts           # Queues consumer handler
+│   │   └── package.json
+│   │
+│   ├── netlify/                      # @mcp/platform-netlify
+│   │   ├── src/
+│   │   │   ├── index.ts
+│   │   │   ├── function.ts         # Netlify Function handler
+│   │   │   └── edge.ts             # Edge Function handler
+│   │   └── package.json
+│   │
+│   ├── aws-lambda/                   # @mcp/platform-aws-lambda
+│   │   ├── src/
+│   │   │   ├── index.ts
+│   │   │   ├── handler.ts          # Lambda handler
+│   │   │   └── api-gateway.ts      # API Gateway integration
+│   │   └── package.json
+│   │
+│   └── node/                         # @mcp/platform-node
+│       ├── src/
+│       │   ├── index.ts
+│       │   └── standalone.ts        # Standalone Node.js server
+│       └── package.json
 │
-├── transport-gcp/              # GCP transports
-│   ├── src/
-│   │   ├── index.ts
-│   │   └── pubsub.ts
-│   └── package.json
+├── skills/                           # Deployment & operations skills
+│   ├── deploy/                       # @mcp/skill-deploy
+│   │   ├── src/
+│   │   │   ├── index.ts
+│   │   │   ├── vercel.ts
+│   │   │   ├── cloudflare.ts
+│   │   │   ├── netlify.ts
+│   │   │   ├── aws.ts
+│   │   │   └── docker.ts
+│   │   └── package.json
+│   │
+│   ├── conformance/                  # @mcp/skill-conformance
+│   │   ├── src/
+│   │   │   ├── index.ts
+│   │   │   └── run.ts
+│   │   └── package.json
+│   │
+│   └── scaffold/                     # @mcp/skill-scaffold
+│       ├── src/
+│       │   └── index.ts
+│       ├── templates/
+│       │   ├── basic/
+│       │   ├── vercel/
+│       │   ├── cloudflare/
+│       │   ├── netlify/
+│       │   ├── aws/
+│       │   ├── gcp/
+│       │   └── azure/
+│       └── package.json
 │
-├── transport-azure/            # Azure transports
-│   ├── src/
-│   │   ├── index.ts
-│   │   └── servicebus.ts
-│   └── package.json
+├── examples/                         # Working example servers
+│   ├── basic/                        # Simplest possible server
+│   ├── vercel-nextjs/                # Vercel + Next.js
+│   ├── cloudflare-workers/           # CF Workers + Durable Objects
+│   ├── netlify-functions/            # Netlify Functions
+│   ├── aws-lambda/                   # AWS Lambda + SQS + DynamoDB
+│   ├── gcp-functions/                # GCP Cloud Functions
+│   ├── docker-compose/               # Self-hosted with Docker
+│   └── full-featured/                # All features demo
 │
-├── storage-redis/              # Redis storage
-│   ├── src/
-│   │   └── index.ts
-│   └── package.json
-│
-├── storage-aws/                # AWS storage
-│   ├── src/
-│   │   ├── index.ts
-│   │   └── dynamodb.ts
-│   └── package.json
-│
-├── storage-gcp/                # GCP storage
-│   ├── src/
-│   │   ├── index.ts
-│   │   └── firestore.ts
-│   └── package.json
-│
-├── storage-azure/              # Azure storage
-│   ├── src/
-│   │   ├── index.ts
-│   │   └── cosmosdb.ts
-│   └── package.json
-│
-├── auth-internal/              # Built-in OAuth server
-│   ├── src/
-│   │   └── index.ts
-│   └── package.json
-│
-├── auth-auth0/                 # Auth0 integration
-├── auth-cognito/               # AWS Cognito integration
-├── auth-firebase/              # Firebase Auth integration
-├── auth-azure-ad/              # Azure AD integration
-├── auth-okta/                  # Okta integration
-│
-└── create-mcp-server/          # CLI scaffolding tool
-    ├── src/
-    │   └── index.ts
-    ├── templates/
-    │   ├── basic/
-    │   ├── aws/
-    │   ├── gcp/
-    │   └── azure/
-    └── package.json
+└── docs/                             # Documentation
+    ├── getting-started.md
+    ├── architecture.md
+    ├── platform-guides/
+    │   ├── vercel.md
+    │   ├── cloudflare.md
+    │   ├── netlify.md
+    │   └── ...
+    └── conformance.md
 ```
 
-### 8.2 Package Dependencies
+### 9.3 Turborepo Build Pipeline
+
+```jsonc
+// turbo.json
+{
+  "$schema": "https://turbo.build/schema.json",
+  "globalDependencies": ["tsconfig.json"],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    },
+    "test": {
+      "dependsOn": ["build"],
+      "outputs": []
+    },
+    "test:integration": {
+      "dependsOn": ["build"],
+      "outputs": [],
+      "env": ["REDIS_URL", "UPSTASH_*", "AWS_*", "CLOUDFLARE_*"]
+    },
+    "conformance": {
+      "dependsOn": ["build"],
+      "outputs": ["results/**"],
+      "env": ["MCP_SERVER_URL"]
+    },
+    "lint": {
+      "outputs": []
+    },
+    "typecheck": {
+      "dependsOn": ["^build"],
+      "outputs": []
+    },
+    "deploy": {
+      "dependsOn": ["build", "test", "conformance"],
+      "outputs": [],
+      "cache": false
+    }
+  }
+}
+```
+
+### 9.4 Package Dependencies Graph
 
 ```
-@mcp/distributed-server
+@mcp/distributed-server (core)
 ├── @modelcontextprotocol/sdk (peer)
-├── express (optional peer)
-└── zod
+├── zod
+└── [no HTTP framework dependency — adapters are optional]
 
 @mcp/transport-redis
 ├── @mcp/distributed-server (peer)
 └── redis
 
-@mcp/transport-aws
+@mcp/transport-upstash
 ├── @mcp/distributed-server (peer)
-├── @aws-sdk/client-sqs
-└── @aws-sdk/client-sns
+└── @upstash/redis
 
-@mcp/storage-aws
+@mcp/platform-cloudflare
 ├── @mcp/distributed-server (peer)
-└── @aws-sdk/client-dynamodb
+├── @cloudflare/workers-types (dev)
+└── [uses CF bindings — no runtime deps]
 
-@mcp/auth-cognito
+@mcp/platform-vercel
 ├── @mcp/distributed-server (peer)
-├── @aws-sdk/client-cognito-identity-provider
-└── aws-jwt-verify
+├── @mcp/transport-upstash (peer, optional)
+└── @mcp/storage-upstash (peer, optional)
+
+@mcp/platform-netlify
+├── @mcp/distributed-server (peer)
+└── @netlify/functions
+
+@mcp/conformance-utils
+├── @mcp/distributed-server (peer)
+└── @modelcontextprotocol/conformance
 ```
 
-### 8.3 CLI Tool: create-mcp-server
+### 9.5 Version Management with Changesets
+
+```bash
+# Developer workflow for releasing
+pnpm changeset            # Create a changeset describing changes
+pnpm changeset version    # Bump versions based on changesets
+pnpm changeset publish    # Publish changed packages to npm
+
+# CI publishes automatically on merge to main
+```
+
+```yaml
+# .github/workflows/release.yml
+name: Release
+on:
+  push:
+    branches: [main]
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install
+      - run: pnpm build
+      - run: pnpm test
+      - run: pnpm conformance
+      - uses: changesets/action@v1
+        with:
+          publish: pnpm changeset publish
+```
+
+### 9.6 CLI Tool: create-mcp-server
 
 ```bash
 # Create a new MCP server project
 npx create-mcp-server my-server
 
-# With specific template
-npx create-mcp-server my-server --template aws
+# With specific platform
+npx create-mcp-server my-server --platform cloudflare
+npx create-mcp-server my-server --platform vercel
+npx create-mcp-server my-server --platform netlify
 
 # Interactive mode
 npx create-mcp-server
 
 ? Project name: my-mcp-server
-? Cloud provider:
-  ❯ None (local development)
-    AWS
-    Google Cloud
-    Azure
-    Self-hosted (Redis)
+? Platform:
+  ❯ Node.js (standalone)
+    Vercel
+    Cloudflare Workers
+    Netlify
+    AWS Lambda
+    Google Cloud Functions
+    Docker
+? Transport:
+  ❯ In-Memory (single instance)
+    Redis
+    Upstash (edge-compatible)
+    AWS SQS
+    Cloudflare Queues + Durable Objects
 ? Authentication:
-  ❯ Built-in OAuth
+  ❯ Built-in OAuth (development)
     Auth0
     AWS Cognito
     Firebase Auth
     Azure AD
-? Include example tools? Yes
+? Include conformance tests? Yes
 ? TypeScript? Yes
 
 Creating project in ./my-mcp-server...
-✓ Created package.json
+✓ Created package.json with platform dependencies
 ✓ Created tsconfig.json
-✓ Created src/index.ts
-✓ Created src/tools/
+✓ Created src/index.ts with platform entry point
+✓ Created src/tools/ with example tools
 ✓ Created .env.example
+✓ Created conformance test setup
 ✓ Installed dependencies
 
 Done! Run:
   cd my-mcp-server
-  npm run dev
+  npm run dev          # Start dev server
+  npm run conformance  # Run MCP conformance tests
 ```
 
 ---
 
-## 9. Migration Path
+## 10. Deployment Skills
 
-### 9.1 Phase 1: Extract Core Interfaces
+Instead of traditional deployment scripts, the library provides **skills** — composable, intelligent deployment workflows that understand the target platform and can be invoked programmatically or via CLI.
+
+### 10.1 Why Skills Over Scripts?
+
+| Aspect | Scripts | Skills |
+|--------|---------|--------|
+| **Context Awareness** | Stateless, runs blindly | Inspects project config, adapts behavior |
+| **Error Recovery** | Fails, user debugs | Diagnoses issues, suggests fixes |
+| **Composability** | Shell pipes, brittle | Typed inputs/outputs, chainable |
+| **Discoverability** | Read the docs | Self-documenting, interactive |
+| **Platform Detection** | Manual flags | Auto-detects from package.json, config files |
+| **Pre-flight Checks** | Manual | Validates env vars, credentials, quotas |
+
+### 10.2 Skill Architecture
+
+```typescript
+// skills/deploy/src/index.ts
+
+interface DeploySkill {
+  /** Unique identifier */
+  name: string;
+
+  /** Which platform this deploys to */
+  platform: string;
+
+  /** Check if project is ready for deployment */
+  preflight(context: ProjectContext): Promise<PreflightResult>;
+
+  /** Execute the deployment */
+  deploy(context: ProjectContext, options: DeployOptions): Promise<DeployResult>;
+
+  /** Verify deployment is healthy */
+  verify(context: ProjectContext, result: DeployResult): Promise<VerifyResult>;
+
+  /** Tear down a deployment */
+  teardown(context: ProjectContext, deploymentId: string): Promise<void>;
+}
+
+interface ProjectContext {
+  /** Root directory of the project */
+  rootDir: string;
+
+  /** Detected platform from config files */
+  detectedPlatform: string | null;
+
+  /** Package.json contents */
+  packageJson: Record<string, unknown>;
+
+  /** Environment variables available */
+  env: Record<string, string>;
+
+  /** Platform-specific config files found */
+  configFiles: {
+    'vercel.json'?: unknown;
+    'wrangler.toml'?: unknown;
+    'netlify.toml'?: unknown;
+    'Dockerfile'?: boolean;
+  };
+}
+
+interface PreflightResult {
+  ready: boolean;
+  checks: Array<{
+    name: string;
+    passed: boolean;
+    message: string;
+    fix?: string;  // Suggested fix if failed
+  }>;
+}
+
+interface DeployResult {
+  deploymentId: string;
+  url: string;
+  platform: string;
+  timestamp: string;
+  metadata: Record<string, unknown>;
+}
+```
+
+### 10.3 Vercel Deploy Skill
+
+```typescript
+// skills/deploy/src/vercel.ts
+
+export class VercelDeploySkill implements DeploySkill {
+  name = 'deploy:vercel';
+  platform = 'vercel';
+
+  async preflight(ctx: ProjectContext): Promise<PreflightResult> {
+    const checks = [];
+
+    // Check Vercel CLI
+    checks.push(await this.checkCli());
+
+    // Check vercel.json or Next.js config
+    checks.push(this.checkConfig(ctx));
+
+    // Check environment variables
+    checks.push(this.checkEnvVars(ctx, [
+      'UPSTASH_REDIS_REST_URL',
+      'UPSTASH_REDIS_REST_TOKEN',
+    ]));
+
+    // Check build succeeds
+    checks.push(await this.checkBuild(ctx));
+
+    // Run conformance tests
+    checks.push(await this.checkConformance(ctx));
+
+    return {
+      ready: checks.every(c => c.passed),
+      checks,
+    };
+  }
+
+  async deploy(ctx: ProjectContext, options: DeployOptions): Promise<DeployResult> {
+    // 1. Run preflight
+    const preflight = await this.preflight(ctx);
+    if (!preflight.ready) {
+      throw new DeployError('Preflight failed', preflight.checks);
+    }
+
+    // 2. Deploy
+    const result = await exec('vercel', [
+      '--yes',
+      options.production ? '--prod' : '',
+      '--token', ctx.env.VERCEL_TOKEN,
+    ].filter(Boolean), { cwd: ctx.rootDir });
+
+    const url = result.stdout.trim();
+
+    return {
+      deploymentId: url,
+      url,
+      platform: 'vercel',
+      timestamp: new Date().toISOString(),
+      metadata: { production: options.production },
+    };
+  }
+
+  async verify(ctx: ProjectContext, result: DeployResult): Promise<VerifyResult> {
+    // Run conformance tests against the deployed URL
+    const conformance = await runConformance({
+      serverUrl: `${result.url}/mcp`,
+      scenarios: 'all',
+      timeout: 30000,
+    });
+
+    return {
+      healthy: conformance.passed,
+      checks: conformance.results,
+      conformanceScore: conformance.score,
+    };
+  }
+}
+```
+
+### 10.4 Cloudflare Deploy Skill
+
+```typescript
+// skills/deploy/src/cloudflare.ts
+
+export class CloudflareDeploySkill implements DeploySkill {
+  name = 'deploy:cloudflare';
+  platform = 'cloudflare';
+
+  async preflight(ctx: ProjectContext): Promise<PreflightResult> {
+    const checks = [];
+
+    // Check wrangler CLI
+    checks.push(await this.checkCli('wrangler'));
+
+    // Check wrangler.toml
+    checks.push(this.checkWranglerConfig(ctx));
+
+    // Check Durable Object bindings
+    checks.push(this.checkDurableObjectBindings(ctx));
+
+    // Check KV namespace bindings
+    checks.push(this.checkKvNamespaces(ctx));
+
+    // Check Cloudflare API token
+    checks.push(this.checkEnvVars(ctx, ['CLOUDFLARE_API_TOKEN']));
+
+    // Check compatibility date
+    checks.push(this.checkCompatibilityDate(ctx));
+
+    // Run conformance tests locally
+    checks.push(await this.checkConformance(ctx));
+
+    return {
+      ready: checks.every(c => c.passed),
+      checks,
+    };
+  }
+
+  async deploy(ctx: ProjectContext, options: DeployOptions): Promise<DeployResult> {
+    const preflight = await this.preflight(ctx);
+    if (!preflight.ready) {
+      throw new DeployError('Preflight failed', preflight.checks);
+    }
+
+    // Create KV namespaces if needed
+    await this.ensureKvNamespaces(ctx);
+
+    // Deploy with wrangler
+    const result = await exec('wrangler', [
+      'deploy',
+      '--env', options.production ? 'production' : 'staging',
+    ], { cwd: ctx.rootDir });
+
+    // Extract deployment URL from wrangler output
+    const url = this.extractUrl(result.stdout);
+
+    return {
+      deploymentId: url,
+      url,
+      platform: 'cloudflare',
+      timestamp: new Date().toISOString(),
+      metadata: {
+        durableObjects: true,
+        routes: this.extractRoutes(result.stdout),
+      },
+    };
+  }
+
+  async verify(ctx: ProjectContext, result: DeployResult): Promise<VerifyResult> {
+    // Verify Durable Objects are responsive
+    const doCheck = await this.checkDurableObjectHealth(result.url);
+
+    // Run conformance suite against deployed worker
+    const conformance = await runConformance({
+      serverUrl: `${result.url}/mcp`,
+      scenarios: 'all',
+      timeout: 30000,
+    });
+
+    return {
+      healthy: doCheck.healthy && conformance.passed,
+      checks: [doCheck, ...conformance.results],
+      conformanceScore: conformance.score,
+    };
+  }
+}
+```
+
+### 10.5 Netlify Deploy Skill
+
+```typescript
+// skills/deploy/src/netlify.ts
+
+export class NetlifyDeploySkill implements DeploySkill {
+  name = 'deploy:netlify';
+  platform = 'netlify';
+
+  async preflight(ctx: ProjectContext): Promise<PreflightResult> {
+    const checks = [];
+
+    checks.push(await this.checkCli('netlify'));
+    checks.push(this.checkNetlifyToml(ctx));
+    checks.push(this.checkFunctionsDir(ctx));
+    checks.push(this.checkEnvVars(ctx, [
+      'UPSTASH_REDIS_REST_URL',   // Netlify needs external transport
+      'UPSTASH_REDIS_REST_TOKEN',
+    ]));
+    checks.push(this.checkStreamingSupport(ctx)); // Ensure Functions v2
+    checks.push(await this.checkConformance(ctx));
+
+    return {
+      ready: checks.every(c => c.passed),
+      checks,
+    };
+  }
+
+  async deploy(ctx: ProjectContext, options: DeployOptions): Promise<DeployResult> {
+    const result = await exec('netlify', [
+      'deploy',
+      options.production ? '--prod' : '',
+      '--json',
+    ].filter(Boolean), { cwd: ctx.rootDir });
+
+    const output = JSON.parse(result.stdout);
+
+    return {
+      deploymentId: output.deploy_id,
+      url: output.deploy_url,
+      platform: 'netlify',
+      timestamp: new Date().toISOString(),
+      metadata: output,
+    };
+  }
+}
+```
+
+### 10.6 Docker Deploy Skill
+
+```typescript
+// skills/deploy/src/docker.ts
+
+export class DockerDeploySkill implements DeploySkill {
+  name = 'deploy:docker';
+  platform = 'docker';
+
+  async preflight(ctx: ProjectContext): Promise<PreflightResult> {
+    const checks = [];
+
+    checks.push(await this.checkCli('docker'));
+    checks.push(this.checkDockerfile(ctx));
+    checks.push(this.checkDockerCompose(ctx));
+    checks.push(await this.checkConformance(ctx));
+
+    return {
+      ready: checks.every(c => c.passed),
+      checks,
+    };
+  }
+
+  async deploy(ctx: ProjectContext, options: DeployOptions): Promise<DeployResult> {
+    // Build image
+    await exec('docker', ['compose', 'build'], { cwd: ctx.rootDir });
+
+    // Start services
+    await exec('docker', ['compose', 'up', '-d'], { cwd: ctx.rootDir });
+
+    // Wait for health check
+    await this.waitForHealthy('http://localhost:3000/mcp');
+
+    return {
+      deploymentId: 'local',
+      url: 'http://localhost:3000',
+      platform: 'docker',
+      timestamp: new Date().toISOString(),
+      metadata: {},
+    };
+  }
+}
+```
+
+### 10.7 Skill CLI Interface
+
+```bash
+# Auto-detect platform and deploy
+npx @mcp/skill-deploy
+
+# Explicit platform
+npx @mcp/skill-deploy --platform vercel
+npx @mcp/skill-deploy --platform cloudflare
+npx @mcp/skill-deploy --platform netlify
+
+# Just run preflight checks
+npx @mcp/skill-deploy preflight
+
+# Deploy to production
+npx @mcp/skill-deploy --production
+
+# Verify an existing deployment
+npx @mcp/skill-deploy verify --url https://my-mcp.vercel.app
+
+# Tear down
+npx @mcp/skill-deploy teardown --deployment-id dep_abc123
+```
+
+### 10.8 Skill Pipeline (Composable)
+
+```typescript
+// Compose skills into a full CI/CD pipeline
+import { Pipeline } from '@mcp/skill-deploy';
+import { ConformanceSkill } from '@mcp/skill-conformance';
+
+const pipeline = new Pipeline()
+  .step('build', async (ctx) => {
+    await exec('pnpm', ['build'], { cwd: ctx.rootDir });
+  })
+  .step('test', async (ctx) => {
+    await exec('pnpm', ['test'], { cwd: ctx.rootDir });
+  })
+  .step('conformance', new ConformanceSkill({
+    scenarios: 'all',
+    failOnWarning: false,
+  }))
+  .step('deploy', new VercelDeploySkill())
+  .step('verify', async (ctx, prev) => {
+    // prev.deploy contains DeployResult
+    const conformance = new ConformanceSkill({
+      serverUrl: prev.deploy.url,
+      scenarios: 'all',
+    });
+    return conformance.run(ctx);
+  })
+  .onFailure(async (ctx, error, step) => {
+    console.error(`Pipeline failed at ${step}:`, error);
+    // Auto-rollback if deploy step failed
+    if (step === 'verify') {
+      await rollback(ctx, prev.deploy);
+    }
+  });
+
+await pipeline.run({ rootDir: process.cwd() });
+```
+
+---
+
+## 11. MCP Conformance Testing
+
+### 11.1 Overview
+
+The library integrates with the official [modelcontextprotocol/conformance](https://github.com/modelcontextprotocol/conformance) test suite to validate that every server built with the library correctly implements the MCP specification. This is built into every stage: development, CI, and post-deployment verification.
+
+### 11.2 The Official Conformance Suite
+
+The official `@modelcontextprotocol/conformance` package provides:
+
+| Scenario | What It Tests |
+|----------|---------------|
+| `server-initialize` | Initialization handshake, capability negotiation |
+| `tools-list` | Tool listing endpoint |
+| `tools-call-*` | Tool invocation, argument validation, error handling |
+| `resources-*` | Resource listing, reading, subscriptions |
+| `prompts-*` | Prompt listing, argument completion |
+| `auth` | OAuth 2.0 flow, PKCE, token validation |
+
+**CLI Usage:**
+```bash
+npx @modelcontextprotocol/conformance server \
+  --url http://localhost:3000/mcp
+
+npx @modelcontextprotocol/conformance server \
+  --url http://localhost:3000/mcp \
+  --scenario server-initialize
+
+npx @modelcontextprotocol/conformance list --server
+```
+
+### 11.3 Library Conformance Integration
+
+The library wraps the official suite with platform-aware test profiles and integrates it into the development workflow.
+
+```typescript
+// packages/conformance/src/index.ts
+
+export interface ConformanceConfig {
+  /** Server URL to test against */
+  serverUrl?: string;
+
+  /** Start server automatically if no URL provided */
+  autoStart?: {
+    command: string;
+    port: number;
+    readyPattern?: string | RegExp;
+    timeout?: number;
+  };
+
+  /** Which scenarios to run */
+  scenarios?: string[] | 'all';
+
+  /** Platform-specific test profile */
+  profile?: ConformanceProfile;
+
+  /** Fail on warnings (strict mode) */
+  strict?: boolean;
+
+  /** Output format */
+  reporter?: 'console' | 'json' | 'github-actions' | 'junit';
+
+  /** Timeout per scenario in ms */
+  timeout?: number;
+}
+
+export type ConformanceProfile =
+  | 'basic'          // Tools only
+  | 'standard'       // Tools + Resources + Prompts
+  | 'full'           // All features
+  | 'edge'           // Edge-compatible subset (no long-running)
+  | 'serverless'     // Serverless-compatible subset
+  | 'auth'           // Auth-only scenarios
+  | PlatformProfile;
+
+interface PlatformProfile {
+  platform: 'vercel' | 'cloudflare' | 'netlify' | 'aws-lambda';
+  features: string[];
+  excluded: string[];  // Scenarios known to not work on this platform
+}
+```
+
+### 11.4 Platform-Specific Profiles
+
+Different platforms have different capabilities. The conformance profiles encode what's testable where:
+
+```typescript
+// packages/conformance/src/profiles.ts
+
+export const PROFILES: Record<string, PlatformProfile> = {
+  vercel: {
+    platform: 'vercel',
+    features: ['tools', 'resources', 'prompts', 'auth', 'streaming'],
+    excluded: [
+      // Vercel Edge has 60s timeout — exclude long-running scenarios
+      'tools-call-long-running',
+      // No WebSocket support
+      'transport-websocket',
+    ],
+  },
+
+  cloudflare: {
+    platform: 'cloudflare',
+    features: ['tools', 'resources', 'prompts', 'auth', 'streaming', 'websocket'],
+    excluded: [
+      // Durable Objects have 30s subrequest limit
+      'tools-call-external-timeout',
+    ],
+  },
+
+  netlify: {
+    platform: 'netlify',
+    features: ['tools', 'resources', 'prompts', 'auth', 'streaming'],
+    excluded: [
+      // Netlify Functions have 26s timeout
+      'tools-call-long-running',
+      'transport-websocket',
+    ],
+  },
+
+  'aws-lambda': {
+    platform: 'aws-lambda',
+    features: ['tools', 'resources', 'prompts', 'auth'],
+    excluded: [
+      // Lambda has response streaming but limited SSE
+      'transport-sse-keepalive',
+      'transport-websocket',
+    ],
+  },
+
+  node: {
+    platform: 'node' as any,
+    features: ['tools', 'resources', 'prompts', 'auth', 'streaming', 'websocket', 'sampling'],
+    excluded: [], // Full support
+  },
+};
+```
+
+### 11.5 Conformance Skill
+
+```typescript
+// skills/conformance/src/index.ts
+
+export class ConformanceSkill {
+  constructor(private config: ConformanceConfig = {}) {}
+
+  async run(ctx: ProjectContext): Promise<ConformanceResult> {
+    let serverUrl = this.config.serverUrl;
+    let serverProcess: ChildProcess | null = null;
+
+    // Auto-start server if needed
+    if (!serverUrl && this.config.autoStart) {
+      serverProcess = await this.startServer(this.config.autoStart);
+      serverUrl = `http://localhost:${this.config.autoStart.port}/mcp`;
+    }
+
+    if (!serverUrl) {
+      // Try to detect from project config
+      serverUrl = await this.detectServerUrl(ctx);
+    }
+
+    try {
+      // Detect platform profile
+      const profile = this.config.profile
+        ?? await this.detectProfile(ctx);
+
+      // Get applicable scenarios
+      const scenarios = this.getScenarios(profile);
+
+      // Run official conformance suite
+      const results = await this.runConformanceSuite(serverUrl, scenarios);
+
+      // Generate report
+      const report = this.generateReport(results, profile);
+
+      return report;
+    } finally {
+      if (serverProcess) {
+        serverProcess.kill();
+      }
+    }
+  }
+
+  private async runConformanceSuite(
+    url: string,
+    scenarios: string[]
+  ): Promise<ScenarioResult[]> {
+    const results: ScenarioResult[] = [];
+
+    for (const scenario of scenarios) {
+      try {
+        // Shell out to official conformance CLI
+        const result = await exec('npx', [
+          '@modelcontextprotocol/conformance',
+          'server',
+          '--url', url,
+          '--scenario', scenario,
+          '--json',
+        ], { timeout: this.config.timeout ?? 30000 });
+
+        const checks = JSON.parse(
+          await readFile(`results/${scenario}-*/checks.json`, 'utf-8')
+        );
+
+        results.push({
+          scenario,
+          passed: checks.every((c: any) => c.passed),
+          checks,
+          duration: Date.now(),
+        });
+      } catch (error) {
+        results.push({
+          scenario,
+          passed: false,
+          checks: [{ name: scenario, passed: false, message: String(error) }],
+          duration: 0,
+        });
+      }
+    }
+
+    return results;
+  }
+
+  private generateReport(
+    results: ScenarioResult[],
+    profile: ConformanceProfile
+  ): ConformanceResult {
+    const passed = results.filter(r => r.passed).length;
+    const failed = results.filter(r => !r.passed).length;
+    const total = results.length;
+
+    return {
+      passed: failed === 0,
+      score: total > 0 ? Math.round((passed / total) * 100) : 0,
+      summary: `${passed}/${total} scenarios passed`,
+      profile: typeof profile === 'string' ? profile : profile.platform,
+      results,
+      timestamp: new Date().toISOString(),
+    };
+  }
+}
+```
+
+### 11.6 In-Code Conformance Testing
+
+```typescript
+// In a vitest/jest test file
+import { describe, it, expect } from 'vitest';
+import { runConformance } from '@mcp/conformance-utils';
+import { createMcpServer } from '@mcp/distributed-server';
+
+describe('MCP Conformance', () => {
+  it('passes all standard conformance scenarios', async () => {
+    const server = createMcpServer({
+      name: 'test-server',
+      version: '1.0.0',
+    });
+
+    server.tool('echo', { message: 'string' }, async ({ message }) => ({
+      content: [{ type: 'text', text: message }],
+    }));
+
+    const result = await runConformance({
+      autoStart: {
+        server,     // Pass server instance directly
+        port: 0,    // Random available port
+      },
+      profile: 'standard',
+      strict: true,
+    });
+
+    expect(result.passed).toBe(true);
+    expect(result.score).toBe(100);
+  }, 60000);
+});
+```
+
+### 11.7 CI/CD Integration
+
+#### GitHub Actions
+
+```yaml
+# .github/workflows/conformance.yml
+name: MCP Conformance
+on: [push, pull_request]
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        profile: [basic, standard, full, edge, serverless]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install && pnpm build
+
+      - name: Run conformance tests
+        run: |
+          npx @mcp/skill-conformance \
+            --profile ${{ matrix.profile }} \
+            --reporter github-actions \
+            --strict
+
+      # Or use the community GitHub Action
+      - uses: mcp-use/mcp-conformance-action@v1
+        with:
+          server-url: http://localhost:3000/mcp
+          start-command: pnpm start
+```
+
+#### Post-Deploy Verification
+
+```yaml
+  verify-deployment:
+    needs: [deploy]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify deployed server
+        run: |
+          npx @mcp/skill-conformance \
+            --server-url ${{ needs.deploy.outputs.url }}/mcp \
+            --profile ${{ needs.deploy.outputs.platform }} \
+            --reporter github-actions
+```
+
+### 11.8 Conformance Badge
+
+```markdown
+<!-- In project README -->
+[![MCP Conformance](https://img.shields.io/badge/MCP-conformant-green)](https://github.com/modelcontextprotocol/conformance)
+
+<!-- Or with score -->
+[![MCP Score](https://img.shields.io/badge/MCP_Score-100%25-brightgreen)]()
+```
+
+### 11.9 Additional Validation Tools
+
+Beyond the official conformance suite, the library integrates with community tools:
+
+| Tool | Purpose | Integration |
+|------|---------|-------------|
+| **MCP Inspector** | Interactive debugging | `npx @modelcontextprotocol/inspector --cli` for automated checks |
+| **MCP Scan** | Security scanning | Pre-deploy security checks in skill pipeline |
+| **mcp-validator** | Extended protocol validation | Additional scenarios beyond official suite |
+
+---
+
+## 12. Migration Path
+
+### 12.1 Phase 1: Extract Core Interfaces
 
 **Goal**: Define stable interfaces without breaking existing code
 
@@ -2065,7 +3614,7 @@ Done! Run:
 
 **Estimated Changes**: ~20 files, low risk
 
-### 9.2 Phase 2: Implement Abstraction Layers
+### 12.2 Phase 2: Implement Abstraction Layers
 
 **Goal**: Create transport and storage abstractions
 
@@ -2077,7 +3626,7 @@ Done! Run:
 
 **Estimated Changes**: ~15 files, medium risk
 
-### 9.3 Phase 3: Create Builder API
+### 12.3 Phase 3: Create Builder API
 
 **Goal**: Simple `createMcpServer()` API
 
@@ -2089,20 +3638,22 @@ Done! Run:
 
 **Estimated Changes**: ~10 new files, low risk
 
-### 9.4 Phase 4: Extract Packages
+### 12.4 Phase 4: Extract Packages into Workspace
 
-**Goal**: Split into separate npm packages
+**Goal**: Split into pnpm workspace monorepo
 
-1. Create monorepo structure with pnpm workspaces
-2. Move core to `@mcp/distributed-server`
-3. Move Redis implementations to `@mcp/transport-redis` and `@mcp/storage-redis`
-4. Create cloud provider packages
-5. Set up proper peer dependencies
-6. Add package publishing workflow
+1. Set up pnpm workspaces + Turborepo
+2. Move core to `packages/core/`
+3. Move Redis implementations to `packages/transport-redis/` and `packages/storage-redis/`
+4. Create platform packages in `platforms/`
+5. Create skills in `skills/`
+6. Set up Changesets for version management
+7. Set up proper peer dependencies
+8. Add package publishing workflow
 
 **Estimated Changes**: Project restructure, medium risk
 
-### 9.5 Phase 5: Cloud Provider Implementations
+### 12.5 Phase 5: Cloud Provider Implementations
 
 **Goal**: Native cloud provider support
 
@@ -2114,11 +3665,35 @@ Done! Run:
 
 **Estimated Changes**: ~30 new files per provider, low risk (additive)
 
+### 12.6 Phase 6: Edge & Serverless Platforms
+
+**Goal**: First-class edge platform support
+
+1. Implement Cloudflare Workers + Durable Objects platform
+2. Implement Vercel + Upstash platform
+3. Implement Netlify Functions platform
+4. Create platform-specific conformance profiles
+5. Add Upstash transport + storage packages
+
+**Estimated Changes**: ~20 files per platform, low risk (additive)
+
+### 12.7 Phase 7: Skills & Conformance
+
+**Goal**: Deployment automation and validation
+
+1. Create conformance-utils package wrapping official suite
+2. Create deploy skill with per-platform implementations
+3. Create scaffold skill with templates
+4. Integrate conformance into CI/CD
+5. Create GitHub Action for conformance
+
+**Estimated Changes**: ~30 new files, low risk (additive)
+
 ---
 
-## 10. Performance Considerations
+## 13. Performance Considerations
 
-### 10.1 Transport Latency Optimization
+### 13.1 Transport Latency Optimization
 
 ```typescript
 interface TransportOptimizations {
@@ -2137,7 +3712,7 @@ interface TransportOptimizations {
 }
 ```
 
-### 10.2 Storage Caching Layer
+### 13.2 Storage Caching Layer
 
 ```typescript
 interface CacheConfig {
@@ -2168,7 +3743,7 @@ const server = createMcpServer({
 });
 ```
 
-### 10.3 Horizontal Scaling
+### 13.3 Horizontal Scaling
 
 ```
                     Load Balancer
@@ -2193,82 +3768,102 @@ State Sharing: Via distributed storage
 Message Routing: Via transport pub/sub
 ```
 
+### 13.4 Edge Platform Considerations
+
+| Platform | Constraint | Mitigation |
+|----------|-----------|------------|
+| Vercel Edge | 60s timeout, no TCP sockets | Upstash HTTP-based Redis, short-lived sessions |
+| CF Workers | 128MB memory, 30s CPU time | Durable Objects for session state, Queues for overflow |
+| Netlify Edge | 50ms CPU limit | Use Functions v2 (not Edge) for MCP |
+| Lambda | Cold starts, 15min max | Provisioned concurrency, warm pools |
+
 ---
 
-## 11. Security Considerations
+## 14. Security Considerations
 
-### 11.1 Transport Security
+### 14.1 Transport Security
 
 - **Encryption in Transit**: All transports should support TLS
 - **Message Signing**: Optional HMAC signing for message integrity
 - **Access Control**: IAM roles for cloud transports
+- **Edge**: Upstash REST API uses HTTPS; CF Workers use built-in TLS
 
-### 11.2 Storage Security
+### 14.2 Storage Security
 
 - **Encryption at Rest**: All storage backends encrypt data
-- **Key Management**: Integration with cloud KMS services
+- **Key Management**: Integration with cloud KMS services (AWS KMS, GCP KMS, CF Secrets)
 - **Access Control**: Least-privilege IAM policies
+- **Edge**: Durable Object storage is encrypted at rest by Cloudflare
 
-### 11.3 Authentication Security
+### 14.3 Authentication Security
 
 - **Token Validation Caching**: Configurable cache duration
 - **Rate Limiting**: Per-endpoint rate limits
 - **PKCE Enforcement**: Required for public clients
 - **Token Rotation**: Automatic refresh token rotation
 
-### 11.4 Session Security
+### 14.4 Session Security
 
 - **Session Isolation**: Users can only access their own sessions
 - **Session Timeout**: Configurable inactivity timeout
 - **Session Revocation**: Ability to invalidate all user sessions
+- **Durable Objects**: Each session is its own isolated actor
+
+### 14.5 Conformance as Security
+
+- Run MCP conformance tests pre-deploy to catch protocol violations
+- Use MCP Scan for security-specific vulnerability detection
+- Conformance failures block deployment via skill pipeline
 
 ---
 
-## 12. Implementation Roadmap
+## 15. Implementation Roadmap
 
 ### Milestone 1: Core Library (v0.1.0)
-- [ ] Define all core interfaces
+- [ ] Define all core interfaces (ITransport, IStorage, IAuth)
 - [ ] Implement InMemoryTransport
 - [ ] Implement InMemoryStorage
 - [ ] Create McpServerBuilder API
 - [ ] Express adapter
 - [ ] Basic documentation
 
-### Milestone 2: Redis Support (v0.2.0)
-- [ ] RedisTransport (Pub/Sub)
-- [ ] RedisTransport (Streams)
+### Milestone 2: Redis + Upstash Support (v0.2.0)
+- [ ] RedisTransport (Pub/Sub + Streams)
 - [ ] RedisStorage
-- [ ] Connection pooling
-- [ ] Failover support
+- [ ] UpstashTransport (HTTP-based, edge-compatible)
+- [ ] UpstashStorage
+- [ ] Connection pooling and failover
 
-### Milestone 3: AWS Support (v0.3.0)
-- [ ] SQSTransport
-- [ ] DynamoDBStorage
-- [ ] CognitoAuth
-- [ ] Lambda handler
-- [ ] AWS deployment guide
+### Milestone 3: Edge Platforms (v0.3.0)
+- [ ] Cloudflare Workers + Durable Objects platform
+- [ ] Vercel platform (Serverless + Edge adapters)
+- [ ] Netlify platform (Functions v2 adapter)
+- [ ] Platform-specific conformance profiles
 
-### Milestone 4: GCP Support (v0.4.0)
-- [ ] PubSubTransport
-- [ ] FirestoreStorage
-- [ ] FirebaseAuth
-- [ ] Cloud Functions handler
-- [ ] GCP deployment guide
+### Milestone 4: Traditional Cloud Providers (v0.4.0)
+- [ ] AWS: SQS + DynamoDB + Cognito + Lambda handler
+- [ ] GCP: Pub/Sub + Firestore + Firebase Auth + Cloud Functions
+- [ ] Azure: Service Bus + CosmosDB + Azure AD + Azure Functions
 
-### Milestone 5: Azure Support (v0.5.0)
-- [ ] ServiceBusTransport
-- [ ] CosmosDBStorage
-- [ ] AzureADAuth
-- [ ] Azure Functions handler
-- [ ] Azure deployment guide
+### Milestone 5: Skills & Conformance (v0.5.0)
+- [ ] Conformance-utils package wrapping official suite
+- [ ] Deploy skills (Vercel, Cloudflare, Netlify, Docker, AWS)
+- [ ] Scaffold skill with platform templates
+- [ ] GitHub Action for conformance testing
+- [ ] MCP Scan integration for security checks
 
-### Milestone 6: Production Ready (v1.0.0)
-- [ ] Comprehensive test suite
-- [ ] Performance benchmarks
+### Milestone 6: Workspace & DX (v0.6.0)
+- [ ] pnpm workspace + Turborepo setup
+- [ ] Changesets version management
+- [ ] create-mcp-server CLI tool
+- [ ] Platform-specific example projects
+
+### Milestone 7: Production Ready (v1.0.0)
+- [ ] Comprehensive test suite (unit + integration + e2e)
+- [ ] Performance benchmarks per platform
 - [ ] Security audit
-- [ ] Full documentation
-- [ ] CLI tool (create-mcp-server)
-- [ ] Example applications
+- [ ] Full documentation site
+- [ ] Conformance score 100% on all platforms
 
 ---
 
@@ -2276,16 +3871,20 @@ Message Routing: Via transport pub/sub
 
 See separate API documentation (to be generated from TypeScript definitions).
 
-## Appendix B: Cloud Provider Setup Guides
+## Appendix B: Platform Setup Guides
 
-See separate deployment guides for each cloud provider.
+See separate deployment guides per platform in `docs/platform-guides/`.
 
 ## Appendix C: Performance Benchmarks
 
 To be added after implementation.
 
+## Appendix D: Conformance Scenario Reference
+
+See [modelcontextprotocol/conformance](https://github.com/modelcontextprotocol/conformance) for the full list of available scenarios. Run `npx @modelcontextprotocol/conformance list --server` for the latest.
+
 ---
 
-*Document Version: 1.0.0*
-*Last Updated: 2026-01-12*
+*Document Version: 2.0.0*
+*Last Updated: 2026-03-13*
 *Authors: Generated for MCP Feature Reference Server*
