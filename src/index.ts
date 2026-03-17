@@ -44,6 +44,10 @@ async function main() {
 
   const app = express();
 
+  // Trust proxy headers (X-Forwarded-For, etc.) when behind reverse proxy (Cloudflare, etc.)
+  // This is required for rate limiting to work correctly with real client IPs
+  app.set('trust proxy', true);
+
   // Basic middleware
   // Intentionally permissive CORS for public MCP reference server
   // This allows any MCP client to test against this reference implementation
@@ -188,7 +192,7 @@ async function main() {
   // Rate limiter for splash page (moderate limit)
   const splashPageLimiter = rateLimit({
     windowMs: 60 * 1000, // 1 minute
-    max: 50, // 50 requests per minute
+    max: 200, // 200 requests per minute
     message: 'Too many requests to splash page',
     standardHeaders: true,
     legacyHeaders: false,

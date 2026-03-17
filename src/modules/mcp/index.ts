@@ -51,7 +51,7 @@ export class MCPModule {
     // Rate limiter for static assets
     const staticAssetLimiter = rateLimit({
       windowMs: 60 * 1000, // 1 minute
-      max: 100, // 100 requests per minute for static assets
+      max: 500, // 500 requests per minute for static assets
       message: 'Too many requests for static assets',
       standardHeaders: true,
       legacyHeaders: false,

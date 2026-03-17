@@ -77,7 +77,7 @@ export class AuthModule {
     // Rate limiters for different route types
     const authLimiter = rateLimit({
       windowMs: 60 * 1000, // 1 minute
-      max: 20, // 20 requests per minute for auth endpoints
+      max: 200, // 200 requests per minute for auth endpoints
       message: 'Too many authentication attempts',
       standardHeaders: true,
       legacyHeaders: false,
@@ -85,7 +85,7 @@ export class AuthModule {
 
     const staticAssetLimiter = rateLimit({
       windowMs: 60 * 1000, // 1 minute
-      max: 100, // 100 requests per minute for static assets
+      max: 500, // 500 requests per minute for static assets
       message: 'Too many requests for static assets',
       standardHeaders: true,
       legacyHeaders: false,
@@ -96,10 +96,10 @@ export class AuthModule {
       provider: this.provider,
       issuerUrl: new URL(this.config.authServerUrl || this.config.baseUri),
       tokenOptions: {
-        rateLimit: { windowMs: 5000, limit: 100 }
+        rateLimit: { windowMs: 5000, limit: 300 } // 300 requests per 5 seconds
       },
       clientRegistrationOptions: {
-        rateLimit: { windowMs: 60000, limit: 10 }
+        rateLimit: { windowMs: 60000, limit: 60 } // 60 requests per minute
       }
     }));
 
