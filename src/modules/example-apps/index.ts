@@ -133,6 +133,11 @@ export class ExampleAppsModule {
           sessionIdGenerator: undefined, // Stateless: no session management
         });
 
+        res.on('close', () => {
+          transport.close();
+          server.close();
+        });
+
         await server.connect(transport);
         await transport.handleRequest(req, res, req.body);
       } catch (error) {
