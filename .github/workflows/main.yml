@@ -24,3 +24,40 @@ jobs:
       - run: npm test
 
       - run: npm run lint
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main' && vars.GCP_PROJECT_ID != ''
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+
+      - id: deploy
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ vars.CLOUD_RUN_SERVICE }}
+          region: ${{ vars.CLOUD_RUN_REGION }}
+          source: .
+          env_vars: |-
+            BASE_URI=${{ vars.BASE_URI }}
+            NODE_ENV=production
+            REDIS_TLS=0
+          secrets: |-
+            REDIS_URL=REDIS_URL:latest
+          flags: |-
+            --vpc-connector=${{ vars.CLOUD_RUN_VPC_CONNECTOR }}
+            --service-account=${{ vars.CLOUD_RUN_SERVICE_ACCOUNT }}
+            --allow-unauthenticated
+            --min-instances=1
+            --max-instances=20
+            --concurrency=250
+            --memory=1Gi
