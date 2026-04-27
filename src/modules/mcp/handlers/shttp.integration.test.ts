@@ -48,16 +48,32 @@ describe('Streamable HTTP Handler Integration Tests', () => {
       },
     } as unknown as Partial<Response>;
 
-    // Create mock request
+    // Create mock request. SDK 1.29 routes handleRequest through
+    // @hono/node-server which expects a real IncomingMessage shape, so
+    // the mock supplies the EventEmitter/stream surface hono touches.
     mockReq = {
       method: 'POST',
+      url: '/',
+      on: jest.fn(),
+      off: jest.fn(),
+      once: jest.fn(),
+      removeListener: jest.fn(),
+      resume: jest.fn(),
+      errored: null,
       headers: {
+        host: 'localhost',
         'content-type': 'application/json',
         'accept': 'application/json, text/event-stream',
         'mcp-protocol-version': '2024-11-05',
       },
       body: {},
-    };
+    } as unknown as Partial<Request>;
+    // Derive rawHeaders lazily so tests that mutate/replace `headers` stay in sync.
+    Object.defineProperty(mockReq, 'rawHeaders', {
+      get() {
+        return Object.entries(this.headers ?? {}).flatMap(([k, v]) => [k, String(v)]);
+      },
+    });
   });
 
   // Helper function to trigger cleanup after handleStreamableHTTP calls
@@ -83,7 +99,16 @@ describe('Streamable HTTP Handler Integration Tests', () => {
     if (sessionIdHeader?.[1]) {
       return sessionIdHeader[1] as string;
     }
-    
+
+    // SDK 1.29 writes headers via writeHead(status, headers) instead of setHeader
+    const writeHeadCalls = (mockRes.writeHead as jest.Mock).mock.calls;
+    for (const [, headers] of writeHeadCalls) {
+      if (headers && typeof headers === 'object') {
+        const id = (headers as Record<string, string>)['mcp-session-id'] ?? (headers as Record<string, string>)['Mcp-Session-Id'];
+        if (id) return id;
+      }
+    }
+
     // Fall back to extracting from Redis channels
     const allChannels = Array.from(mockRedis.subscribers.keys());
     const serverChannel = allChannels.find(channel => channel.includes('mcp:shttp:toserver:'));

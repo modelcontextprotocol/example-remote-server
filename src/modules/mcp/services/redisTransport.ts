@@ -144,7 +144,7 @@ export async function redisRelayToMcpServer(sessionId: string, transport: Transp
     const messagePromise = new Promise<JSONRPCMessage>((resolve) => {
       transport.onmessage = async (message, extra) => {
         // First, set up response subscription if needed
-        if ("id" in message) {
+        if ("id" in message && message.id !== undefined) {
           logger.debug('Setting up response subscription', {
             sessionId,
             messageId: message.id,
@@ -289,7 +289,7 @@ export class ServerRedisTransport implements Transport {
   }
 
   async send(message: JSONRPCMessage, options?: TransportSendOptions): Promise<void> {
-    const relatedRequestId = options?.relatedRequestId?.toString() ?? ("id" in message ? message.id?.toString() : notificationStreamId);
+    const relatedRequestId = options?.relatedRequestId?.toString() ?? ("id" in message && message.id !== undefined ? message.id.toString() : notificationStreamId);
     const channel = getToClientChannel(this._sessionId, relatedRequestId)
 
     logger.debug('Sending message to client', {
@@ -336,13 +336,18 @@ export async function getShttpTransport(sessionId: string, onsessionclosed: (ses
     isGetRequest
   });
   
-  // Giving undefined here and setting the sessionId means the 
-  // transport wont try to create a new session.
+  // Inject the existing session ID so the transport resumes it instead of
+  // creating a new one. SDK 1.29 made sessionId readonly on the wrapper, but
+  // the underlying web-standard transport still exposes it as a writable field;
+  // _initialized must also be set so validateSession accepts non-init requests.
   const shttpTransport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: undefined,
+    sessionIdGenerator: () => sessionId,
     onsessionclosed,
   })
-  shttpTransport.sessionId = sessionId;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const inner = (shttpTransport as any)['_webStandardTransport'];
+  inner.sessionId = sessionId;
+  inner._initialized = true;
 
   // Use the new request-id based relay approach
   const cleanup = await redisRelayToMcpServer(sessionId, shttpTransport, isGetRequest);
