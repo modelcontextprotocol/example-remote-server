@@ -33,6 +33,8 @@ import { createServer as createTranscriptServer } from '@modelcontextprotocol/se
 import { createServer as createVideoResourceServer } from '@modelcontextprotocol/server-video-resource';
 import { createServer as createWikiExplorerServer } from '@modelcontextprotocol/server-wiki-explorer';
 
+import { LAZY_AUTH_SLUG } from './lazy-auth.js';
+
 declare module "express-serve-static-core" {
   interface Request {
     auth?: AuthInfo;
@@ -161,5 +163,8 @@ export class ExampleAppsModule {
   }
 }
 
-// Export list of available examples for documentation
-export const AVAILABLE_EXAMPLES = Object.keys(EXAMPLE_SERVERS);
+// Export list of available examples for documentation. The lazy-auth example
+// is served at the same /:slug/mcp path shape, but as a full Express app with
+// its own OAuth endpoints rather than through the stateless handler above
+// (see ./lazy-auth.ts).
+export const AVAILABLE_EXAMPLES = [...Object.keys(EXAMPLE_SERVERS), LAZY_AUTH_SLUG];
