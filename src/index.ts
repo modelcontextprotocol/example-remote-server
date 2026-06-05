@@ -20,6 +20,7 @@ import { config } from './config.js';
 import { AuthModule } from './modules/auth/index.js';
 import { MCPModule } from './modules/mcp/index.js';
 import { ExampleAppsModule, AVAILABLE_EXAMPLES } from './modules/example-apps/index.js';
+import { mountLazyAuthExample } from './modules/example-apps/lazy-auth.js';
 import { ExternalTokenValidator, InternalTokenValidator, ITokenValidator } from './interfaces/auth-validator.js';
 import { redisClient } from './modules/shared/redis.js';
 import { logger } from './modules/shared/logger.js';
@@ -47,6 +48,13 @@ async function main() {
   // Trust proxy headers (X-Forwarded-For, etc.) when behind reverse proxy (Cloudflare, etc.)
   // This is required for rate limiting to work correctly with real client IPs
   app.set('trust proxy', true);
+
+  // Lazy-auth MCP App example: a full Express app with its own mock OAuth
+  // authorization server, mounted at /lazy-auth. Registered before the host
+  // middleware so its CORS and body handling stay self-contained.
+  if (config.auth.mode !== 'auth_server') {
+    mountLazyAuthExample(app, config.baseUri);
+  }
 
   // Basic middleware
   // Intentionally permissive CORS for public MCP reference server
