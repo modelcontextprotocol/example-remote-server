@@ -51,8 +51,15 @@ function callTool(base: string, name: string, accessToken?: string): Promise<Htt
 describe('Lazy Auth example mount', () => {
   let server: http.Server;
   let base: string;
+  let savedPublicUrl: string | undefined;
 
   beforeAll(async () => {
+    // These tests rely on the package's per-request Host resolution (no baseUri
+    // passed below), so an ambient PUBLIC_URL would pin advertised URLs and
+    // break the assertions. Clear it for the duration and restore afterwards.
+    savedPublicUrl = process.env.PUBLIC_URL;
+    delete process.env.PUBLIC_URL;
+
     const app = express();
     // Mirror src/index.ts: the example mounts before the host's middleware
     // and routes.
@@ -75,6 +82,8 @@ describe('Lazy Auth example mount', () => {
 
   afterAll(async () => {
     await new Promise((resolve) => server.close(resolve));
+    if (savedPublicUrl === undefined) delete process.env.PUBLIC_URL;
+    else process.env.PUBLIC_URL = savedPublicUrl;
   });
 
   it('serves public MCP requests without auth', async () => {
@@ -95,10 +104,22 @@ describe('Lazy Auth example mount', () => {
     expect(res.body).toContain('Lazy Auth');
   });
 
+  it('serves a public tool call without auth', async () => {
+    const res = await callTool(base, 'show_auth_button');
+    expect(res.status).toBe(200);
+    expect(res.headers['www-authenticate']).toBeUndefined();
+  });
+
   it('answers 401 with resource_metadata under the mount path for protected tools', async () => {
     const res = await callTool(base, 'get_secret');
     expect(res.status).toBe(401);
     expect(res.headers['www-authenticate']).toContain(`resource_metadata="${base}/lazy-auth/auth/prm"`);
+  });
+
+  it('answers 401 with invalid_token for a bad bearer token', async () => {
+    const res = await callTool(base, 'get_secret', 'not-a-real-token');
+    expect(res.status).toBe(401);
+    expect(res.headers['www-authenticate']).toContain('invalid_token');
   });
 
   it('advertises mount-prefixed URLs in PRM and AS metadata', async () => {
@@ -170,5 +191,40 @@ describe('Lazy Auth example mount', () => {
     const secretRes = await callTool(base, 'get_secret', token.access_token);
     expect(secretRes.status).toBe(200);
     expect(secretRes.body).toContain('the-answer-is-42');
+  });
+});
+
+describe('mountLazyAuthExample PUBLIC_URL derivation', () => {
+  let savedPublicUrl: string | undefined;
+
+  beforeEach(() => {
+    savedPublicUrl = process.env.PUBLIC_URL;
+    delete process.env.PUBLIC_URL;
+  });
+
+  afterEach(() => {
+    if (savedPublicUrl === undefined) delete process.env.PUBLIC_URL;
+    else process.env.PUBLIC_URL = savedPublicUrl;
+  });
+
+  it('derives PUBLIC_URL from baseUri, stripping trailing slashes and appending the mount path', () => {
+    mountLazyAuthExample(express(), 'https://example.test/');
+    expect(process.env.PUBLIC_URL).toBe('https://example.test/lazy-auth');
+  });
+
+  it('handles a baseUri with no trailing slash', () => {
+    mountLazyAuthExample(express(), 'https://example.test');
+    expect(process.env.PUBLIC_URL).toBe('https://example.test/lazy-auth');
+  });
+
+  it('does not override an explicitly set PUBLIC_URL', () => {
+    process.env.PUBLIC_URL = 'https://tunnel.example/lazy-auth';
+    mountLazyAuthExample(express(), 'https://example.test/');
+    expect(process.env.PUBLIC_URL).toBe('https://tunnel.example/lazy-auth');
+  });
+
+  it('leaves PUBLIC_URL unset when no baseUri is provided', () => {
+    mountLazyAuthExample(express());
+    expect(process.env.PUBLIC_URL).toBeUndefined();
   });
 });

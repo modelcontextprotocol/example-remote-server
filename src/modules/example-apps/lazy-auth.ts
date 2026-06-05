@@ -17,30 +17,35 @@
  * them from PUBLIC_URL, falling back to the request Host header for loopback
  * hosts only. We derive PUBLIC_URL from this server's own public base URI -
  * already the source of truth for the host's OAuth issuer - so deployments
- * need no separate env var. An explicit PUBLIC_URL still wins (e.g. a tunnel);
- * omitting baseUri (e.g. tests on an ephemeral port) keeps the package's
- * per-request Host resolution.
+ * need no separate env var. An explicit PUBLIC_URL still wins (e.g. a tunnel) -
+ * note it must include the /lazy-auth mount path, since the package advertises
+ * it verbatim. Omitting baseUri (e.g. tests on an ephemeral port) keeps the
+ * package's per-request Host resolution.
  */
 import { Express, Request, Response, NextFunction } from 'express';
 import { createApp as createLazyAuthApp } from '@modelcontextprotocol/server-lazy-auth';
 
 export const LAZY_AUTH_SLUG = 'lazy-auth';
 
+// RFC 8414/9728 place well-known discovery documents at the origin root, with
+// the resource path inserted after the well-known prefix
+// (e.g. /.well-known/oauth-authorization-server/lazy-auth). Built from
+// LAZY_AUTH_SLUG so it can't drift from the mount path.
+const WELL_KNOWN_INSERTION = new RegExp(
+  `^/\\.well-known/(oauth-authorization-server|oauth-protected-resource)/${LAZY_AUTH_SLUG}(/.*)?$`
+);
+
 export function mountLazyAuthExample(app: Express, baseUri?: string): void {
   if (baseUri && !process.env.PUBLIC_URL) {
     process.env.PUBLIC_URL = `${baseUri.replace(/\/+$/, '')}/${LAZY_AUTH_SLUG}`;
   }
 
-  // RFC 8414/9728 place well-known discovery documents at the origin root,
-  // with the resource path inserted after the well-known prefix
-  // (e.g. /.well-known/oauth-authorization-server/lazy-auth), and MCP SDK
-  // clients only try that insertion form. Rewrite those root paths into the
-  // mount - rather than dispatching to the sub-app directly - so req.baseUrl
-  // (and therefore every URL the example advertises) stays consistent.
+  // MCP SDK clients only try the path-insertion form above for discovery.
+  // Rewrite those root paths into the mount - rather than dispatching to the
+  // sub-app directly - so req.baseUrl (and therefore every URL the example
+  // advertises) stays consistent.
   app.use((req: Request, _res: Response, next: NextFunction) => {
-    const wellKnown = req.url.match(
-      /^\/\.well-known\/(oauth-authorization-server|oauth-protected-resource)\/lazy-auth(\/.*)?$/
-    );
+    const wellKnown = req.url.match(WELL_KNOWN_INSERTION);
     if (wellKnown) {
       req.url = `/${LAZY_AUTH_SLUG}/.well-known/${wellKnown[1]}${wellKnown[2] ?? ''}`;
     }
