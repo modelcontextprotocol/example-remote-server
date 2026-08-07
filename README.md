@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/modelcontextprotocol-example-remote-server-badge.png)](https://mseep.ai/app/modelcontextprotocol-example-remote-server)
+
 # MCP Feature Reference Server
 
 This repository provides a complete MCP server implementation that 
