@@ -78,9 +78,44 @@ async function main() {
     }
   }
 
-  // OAuth metadata discovery endpoint
+  // OAuth metadata discovery endpoints
   // Only served by MCP servers (not standalone auth servers)
   if (config.auth.mode !== 'auth_server') {
+    // Determine the auth server URL based on mode
+    const authServerUrl = config.auth.mode === 'internal'
+      ? config.baseUri  // Internal mode: auth is in same process
+      : config.auth.externalUrl!;  // External mode: separate auth server
+
+    // OAuth 2.0 Protected Resource Metadata (RFC 9728)
+    // This is what the MCP spec requires the *resource server* to expose: the
+    // bearer-auth middleware advertises this URL in the WWW-Authenticate header
+    // of 401 responses, and clients follow it to discover the authorization
+    // server. Served at the root well-known path (advertised in 401s) and at
+    // the path-suffixed variant for the /mcp endpoint (RFC 9728 §3.1 path
+    // insertion, for clients that derive the URL from the endpoint themselves).
+    const protectedResourceHandler = (resource: string) => (req: express.Request, res: express.Response) => {
+      logger.info('OAuth protected resource metadata discovery', {
+        userAgent: req.get('user-agent'),
+        authMode: config.auth.mode,
+        ip: req.ip
+      });
+
+      res.json({
+        resource,
+        resource_name: 'MCP Feature Reference Server',
+        authorization_servers: [authServerUrl],
+        bearer_methods_supported: ['header'],
+        service_documentation: 'https://modelcontextprotocol.io'
+      });
+    };
+    app.get('/.well-known/oauth-protected-resource', protectedResourceHandler(config.baseUri));
+    app.get('/.well-known/oauth-protected-resource/mcp', protectedResourceHandler(`${config.baseUri}/mcp`));
+
+    // OAuth 2.0 Authorization Server Metadata (RFC 8414), kept on the MCP
+    // server for backwards compatibility: clients of the 2025-03-26 revision
+    // of the MCP spec discover auth by querying this path on the MCP server
+    // directly. In external mode it proxies the metadata shape of the
+    // external auth server's endpoints.
     app.get('/.well-known/oauth-authorization-server', (req, res) => {
       // Log the metadata discovery request
       logger.info('OAuth metadata discovery', {
@@ -88,11 +123,6 @@ async function main() {
         authMode: config.auth.mode,
         ip: req.ip
       });
-
-      // Determine the auth server URL based on mode
-      const authServerUrl = config.auth.mode === 'internal'
-        ? config.baseUri  // Internal mode: auth is in same process
-        : config.auth.externalUrl!;  // External mode: separate auth server
 
       res.json({
         issuer: authServerUrl,
@@ -189,7 +219,8 @@ async function main() {
     console.log('MCP Endpoints:');
     console.log(`   Streamable HTTP: ${config.baseUri}/mcp`);
     console.log(`   SSE (legacy): ${config.baseUri}/sse`);
-    console.log(`   OAuth Metadata: ${config.baseUri}/.well-known/oauth-authorization-server`);
+    console.log(`   Protected Resource Metadata: ${config.baseUri}/.well-known/oauth-protected-resource`);
+    console.log(`   OAuth Metadata (legacy): ${config.baseUri}/.well-known/oauth-authorization-server`);
     console.log('');
     console.log('MCP App Example Servers:');
     for (const slug of AVAILABLE_EXAMPLES) {
