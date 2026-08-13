@@ -6,7 +6,7 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch --inspect src/index.ts",
-    "dev:internal": "AUTH_MODE=internal tsx watch --inspect src/index.ts",
+    "dev:internal": "cross-env AUTH_MODE=internal tsx watch --inspect src/index.ts",
     "dev:external": "concurrently \"AUTH_MODE=auth_server PORT=3001 BASE_URI=http://localhost:3001 tsx watch src/index.ts\" \"sleep 3 && AUTH_MODE=external AUTH_SERVER_URL=http://localhost:3001 tsx watch --inspect src/index.ts\"",
     "build": "tsc && npm run copy-static && npm run build:apps",
     "build:apps": "INPUT=src/apps/hello-world/mcp-app.html vite build",
@@ -61,6 +61,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.7.0",
     "concurrently": "^8.2.0",
+    "cross-env": "^10.1.0",
     "jest": "^29.7.0",
     "ts-jest": "^29.2.5",
     "tsx": "^4.19.2",
