@@ -8,6 +8,11 @@ import { logger } from "../../shared/logger.js";
 let redisTransportCounter = 0;
 const notificationStreamId = "__GET_stream";
 
+// Safety-net TTL for session ownership keys. Live sessions refresh it on every
+// authorized request, and ServerRedisTransport.close() deletes the key, so the
+// TTL only ever fires for keys orphaned by a crashed process.
+const SESSION_OWNER_TTL_SECONDS = 30 * 60;
+
 // Message types for Redis transport
 type RedisMessage = 
   | {
@@ -69,18 +74,33 @@ export async function isLive(sessionId: string): Promise<boolean> {
   return numSubs > 0;
 }
 
+function getSessionOwnerKey(sessionId: string): string {
+  return `session:${sessionId}:owner`;
+}
+
 export async function setSessionOwner(sessionId: string, userId: string): Promise<void> {
   logger.debug('Setting session owner', { sessionId, userId });
-  await redisClient.set(`session:${sessionId}:owner`, userId);
+  await redisClient.set(getSessionOwnerKey(sessionId), userId, { EX: SESSION_OWNER_TTL_SECONDS });
 }
 
 export async function getSessionOwner(sessionId: string): Promise<string | null> {
-  return await redisClient.get(`session:${sessionId}:owner`);
+  return await redisClient.get(getSessionOwnerKey(sessionId));
+}
+
+export async function deleteSessionOwner(sessionId: string): Promise<void> {
+  logger.debug('Deleting session owner', { sessionId });
+  await redisClient.del(getSessionOwnerKey(sessionId));
 }
 
 export async function validateSessionOwnership(sessionId: string, userId: string): Promise<boolean> {
   const owner = await getSessionOwner(sessionId);
-  return owner === userId;
+  if (owner !== userId) {
+    return false;
+  }
+  // Sliding expiration: each authorized request keeps the ownership key alive,
+  // so the TTL only reaps keys whose session never got cleaned up.
+  await redisClient.expire(getSessionOwnerKey(sessionId), SESSION_OWNER_TTL_SECONDS);
+  return true;
 }
 
 export async function isSessionOwnedBy(sessionId: string, userId: string): Promise<boolean> {
@@ -325,7 +345,10 @@ export class ServerRedisTransport implements Transport {
       await this.controlCleanup();
       this.controlCleanup = undefined;
     }
-    
+
+    // The session is finished — remove its ownership key (#21)
+    await deleteSessionOwner(this._sessionId);
+
     this.onclose?.();
   }
 }
