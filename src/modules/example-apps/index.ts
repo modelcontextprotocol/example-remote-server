@@ -11,13 +11,16 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { NodeStreamableHTTPServerTransport } from '@modelcontextprotocol/node';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 
 // Import createServer from each example package (compiled JS)
-// All packages are published on the public npm registry
+// All packages are published on the public npm registry. Since ext-apps 2.0
+// these servers are built on the split MCP SDK 2.0 packages, so they connect
+// to the 2.0 transport below while the rest of this host stays on SDK 1.x;
+// both SDK lines install side by side.
 import { createServer as createBudgetAllocatorServer } from '@modelcontextprotocol/server-budget-allocator';
 import { createServer as createCohortHeatmapServer } from '@modelcontextprotocol/server-cohort-heatmap';
 import { createServer as createCustomerSegmentationServer } from '@modelcontextprotocol/server-customer-segmentation';
@@ -131,13 +134,13 @@ export class ExampleAppsModule {
 
         // Create fresh server and transport for each request (stateless mode)
         const server = createServer();
-        const transport = new StreamableHTTPServerTransport({
+        const transport = new NodeStreamableHTTPServerTransport({
           sessionIdGenerator: undefined, // Stateless: no session management
         });
 
         res.on('close', () => {
-          transport.close();
-          server.close();
+          transport.close().catch(() => {});
+          server.close().catch(() => {});
         });
 
         await server.connect(transport);
