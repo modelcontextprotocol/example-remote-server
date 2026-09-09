@@ -2,7 +2,7 @@
  * Simple Hello World MCP App demonstrating the ext-apps SDK with React.
  */
 import { useApp } from "@modelcontextprotocol/ext-apps/react";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult } from "@modelcontextprotocol/client";
 import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
 
