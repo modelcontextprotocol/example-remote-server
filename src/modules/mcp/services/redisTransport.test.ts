@@ -297,6 +297,52 @@ describe('Redis Transport', () => {
       expect(await validateSessionOwnership(sessionId, 'different-user')).toBe(false);
     });
 
+    it('should set the ownership key with a TTL', async () => {
+      const setSpy = jest.spyOn(mockRedis, 'set');
+
+      await setSessionOwner(sessionId, userId);
+
+      expect(setSpy).toHaveBeenCalledWith(
+        `session:${sessionId}:owner`,
+        userId,
+        expect.objectContaining({ EX: expect.any(Number) })
+      );
+    });
+
+    it('should refresh the ownership TTL on successful validation only', async () => {
+      const expireSpy = jest.spyOn(mockRedis, 'expire');
+      await setSessionOwner(sessionId, userId);
+
+      expect(await validateSessionOwnership(sessionId, userId)).toBe(true);
+      expect(expireSpy).toHaveBeenCalledWith(`session:${sessionId}:owner`, expect.any(Number));
+
+      expireSpy.mockClear();
+      expect(await validateSessionOwnership(sessionId, 'different-user')).toBe(false);
+      expect(expireSpy).not.toHaveBeenCalled();
+    });
+
+    it('should remove the ownership key when the server transport closes', async () => {
+      await setSessionOwner(sessionId, userId);
+      expect(await getSessionOwner(sessionId)).toBe(userId);
+
+      const transport = new ServerRedisTransport(sessionId);
+      await transport.start();
+      await transport.close();
+
+      expect(await getSessionOwner(sessionId)).toBeNull();
+    });
+
+    it('should remove the ownership key when the session is shut down via control message', async () => {
+      await setSessionOwner(sessionId, userId);
+
+      const transport = new ServerRedisTransport(sessionId);
+      await transport.start();
+      await shutdownSession(sessionId);
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      expect(await getSessionOwner(sessionId)).toBeNull();
+    });
+
     it('should check if session is owned by user including liveness', async () => {
       // Session not live yet
       expect(await isSessionOwnedBy(sessionId, userId)).toBe(false);
